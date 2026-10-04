@@ -1553,7 +1553,7 @@ def bay_box(slot, rt=0.0625, body=0.4, tol=0.4, err=(0.0, 0.0), far=5.0, k=1.0, 
 
 
 def slot_run(deg, t, h=0.8, bays=True, tol=0.4, park_err=((0.0, 0.04), (0.0, -0.03)), slots=SLOTS_B, k=1.0,
-             machine_kw=None, ui_kw=None, bay_err=(0.1, -0.08), on_spin=None, **cfg):
+             machine_kw=None, ui_kw=None, bay_err=(0.1, -0.08), on_spin=None, text=None, **cfg):
     """k = 25.4 runs the same board on a machine set to mm."""
     sl = [(x * k, y * k, w * k, od) for x, y, w, od in slots]
     dims = {n: v * k for n, v in PROBE_DIMS.items()}
@@ -1579,7 +1579,7 @@ def slot_run(deg, t, h=0.8, bays=True, tol=0.4, park_err=((0.0, 0.04), (0.0, -0.
     ui = UI(parks=list(parks), **(ui_kw or {}))
     if on_spin:
         ui.on_spin = on_spin
-    vm = TrackingVM(configure(PROBE, **c), m, ui, numfmt=vb_single).run()
+    vm = TrackingVM(text if text is not None else configure(PROBE, **c), m, ui, numfmt=vb_single).run()
     return vm, m, ui, parks
 
 
@@ -2017,7 +2017,8 @@ class TestBatch(unittest.TestCase):
 class _Folder(unittest.TestCase):
     """A scratch VirtualDowel folder: state, settings, run file and data all live in it."""
     KEYS = (("STATE_FILE", "vd_state.json"), ("MACHINE_FILE", "vd_machine.json"), ("RUN_FILE", "vd_run.sbp"),
-            ("CAL_DATA", "vd_cal_data.csv"), ("DEFAULT_DATA", "vd_probe_data.csv"), ("TEMPLATE_FILE", "vd_probe.sbp"))
+            ("CAL_DATA", "vd_cal_data.csv"), ("DEFAULT_DATA", "vd_probe_data.csv"), ("TEMPLATE_FILE", "vd_probe.sbp"),
+            ("ROUGH_DATA", "vd_rough_data.csv"))
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -2041,9 +2042,9 @@ class _Folder(unittest.TestCase):
 class TestPrepare(_Folder):
     """Step 1: everything checked before probing, then vd_run.sbp written with the settings."""
 
-    def prep(self, jobs=None, design=DESIGN, stock=None, sim=False, **m):
+    def prep(self, jobs=None, design=DESIGN, stock=None, sim=False, mode="holes", **m):
         mm = dict(self.machine, **m)
-        return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim,
+        return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim, mode=mode,
                                   template=os.path.join(ROOT, "vd_probe.sbp"))
 
     def test_run_file_carries_the_settings_and_probes_end_to_end(self):
@@ -2074,6 +2075,34 @@ class TestPrepare(_Folder):
         self.assertEqual(va.load_session()["jobs"], [self.job])
         self.assertEqual(va.read_machine_file()["probe"]["passes"], 3)              # remembered for next time
         self.assertEqual(va._sbp_value_lines(open(va.TEMPLATE_FILE).read())["passes"], "3")   # and in vd_probe.sbp
+
+    def test_half_slots_end_to_end(self):
+        # the window's Start probing in half-slot mode: each slot's open side comes from the stock box
+        design = [sv[:3] for sv in SLOTS_B]
+        p = self.prep(design=design, mode="slots")
+        self.assertTrue(p.ok, p.errors)
+        vals = va._sbp_value_lines(self.run_file())
+        self.assertEqual([vals[f"open{i}"] for i in range(1, 7)], ["1", "2", "0", "0", "0", "0"])
+        self.assertEqual(va.load_session()["mode"], "slots")
+        vm, m, _, _ = slot_run(0.9, (1.0, -0.5), text=self.run_file())
+        self.assertEqual(m.collisions, [])
+        with open(va.DEFAULT_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        r = va.align_batch(va.DEFAULT_DATA, [self.job], design)[0][1]
+        self.assertTrue(r.ok, r.report)
+        self.assertAlmostEqual(r.rotation_deg, 0.9, delta=0.01)
+        # a hole run never carries open sides
+        self.prep()
+        self.assertEqual(va._sbp_value_lines(self.run_file())["open1"], "0")
+
+    def test_slots_need_the_stock_box(self):
+        fus = os.path.join(self.tmp, "fusion.sbp")
+        shutil.copy(FUSION, fus)
+        p = self.prep(jobs=[fus], design=[sv[:3] for sv in SLOTS_B], mode="slots")
+        self.assertFalse(p.ok)
+        self.assertTrue(any("stock box" in e for e in p.errors), p.errors)
+        p = self.prep(jobs=[fus], design=[sv[:3] for sv in SLOTS_B], stock=STOCK24, mode="slots")
+        self.assertTrue(p.ok, p.errors)
 
     def test_job_names_outside_latin1_do_not_break_start(self):
         # SB3 files are Latin-1. A file name with an en dash used to crash Start after the old
@@ -2197,6 +2226,37 @@ def sbp_lint_problems(text):
     return risky_string_lines(text)
 
 
+class TestReadmeDryRun(_Folder):
+    """README H1: the dry-run kit in docs/example with the numbers the README gives."""
+
+    def test_h1_numbers_pass(self):
+        ex = os.path.join(ROOT, "docs", "example")
+        job = os.path.join(self.tmp, "sideB_example.sbp")
+        bay = os.path.join(self.tmp, "bays_example.sbp")
+        shutil.copy(os.path.join(ex, "sideB_example.sbp"), job)
+        shutil.copy(os.path.join(ex, "bays_example.sbp"), bay)
+        slots = [(1.5, 15.0, 0.625), (22.5, 15.0, 0.75)]
+        p = va.prepare_rough([job], bay, slots, va.slot_box([job], None), self.machine, sim=True,
+                             template=os.path.join(ROOT, "vd_probe.sbp"))
+        self.assertTrue(p.ok, p.errors)
+        vm = VM(self.run_file(), Machine(holes=[], mode=1), UI(sim_inputs=[(0.05, 15.1, 0), (24.03, 15.2, 0)]),
+                numfmt=vb_single).run()
+        with open(va.ROUGH_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        res = va.rough_from_session()
+        self.assertTrue(res.ok, res.report)
+        self.assertTrue(res.out_path.endswith("bays_example_VDROUGHSIM.sbp"))
+        p = va.prepare_probing([job], slots, None, self.machine, sim=True, mode="slots",
+                               template=os.path.join(ROOT, "vd_probe.sbp"))
+        self.assertTrue(p.ok, p.errors)
+        vm = VM(self.run_file(), Machine(holes=[], mode=1), UI(sim_inputs=list(slots)), numfmt=vb_single).run()
+        with open(va.DEFAULT_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        r = va.align_batch(va.DEFAULT_DATA, [job], slots)[0][1]
+        self.assertTrue(r.ok, r.report)
+        self.assertTrue(r.out_path.endswith("sideB_example_VDSIM.sbp"))
+
+
 class TestPrepareRough(_Folder):
 
     def test_rough_locate_places_the_bay_file(self):
@@ -2221,7 +2281,7 @@ class TestPrepareRough(_Folder):
         vm = VM(text, Machine(holes=[]), UI(parks=[(x, y, 1.0) for x, y in pts]), numfmt=vb_single).run()
         with open(va.ROUGH_DATA, "w") as fh:
             fh.write(data_text(vm))
-        self.assertEqual(va.main(["rough"]), 0)
+        self.assertEqual(va.main(["rough", "--nogui"]), 0)
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "bays_VDROUGH.sbp")))
 
     def test_problems_are_found_first(self):
@@ -2415,6 +2475,46 @@ class TestWindow(_Folder):
         self.assertTrue(b.stale)
         self.assertFalse(os.path.exists(va.default_out_path(self.job, False)))
         b.root.destroy()
+
+    def test_half_slots_rough_locate_then_probing(self):
+        bay = os.path.join(self.tmp, "bays.sbp")
+        with open(bay, "w") as fh:
+            fh.write(BAY_TEXT)
+        a = self.app("prepare")
+        a.pick_files = lambda: [self.job]
+        a.on_add_files()
+        a.loc_var.set("slots")
+        a._on_locate_mode()
+        a._set_holes(SLOTS)
+        a.bay_var.set(bay)
+        a.on_start_rough()
+        self.assertEqual(a.result_code, 0)
+        vals = va._sbp_value_lines(self.run_file())
+        self.assertEqual((vals["rough"], vals["nholes"]), ("1", "2"))
+        pts = [T(1.0, 1.5, -0.5, o) for o in ((12.0, 0.0), (12.0, 30.0))]
+        vm = VM(self.run_file(), Machine(holes=[]), UI(parks=[(x, y, 1.0) for x, y in pts]), numfmt=vb_single).run()
+        with open(va.ROUGH_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        r = self.app("rough")
+        self.assertIn("Bay file placed", r.status.cget("text"))
+        self.assertIn("bays_VDROUGH.sbp", r.text.get("1.0", "end"))
+        self.assertEqual(r.result_code, 0)
+        r.root.destroy()
+        b = self.app("prepare")                                     # C80 again, with the probe in
+        self.assertEqual(b.loc_var.get(), "slots")
+        self.assertEqual(b.bay_var.get(), bay)
+        self.assertEqual(b.jobs, [self.job])
+        b.on_start()
+        self.assertEqual(b.result_code, 0)
+        vals = va._sbp_value_lines(self.run_file())
+        self.assertEqual((vals["rough"], vals["open1"], vals["open2"]), ("0", "3", "4"))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "bays_VDROUGH.sbp")))   # the new session removed it
+
+    def test_rough_result_without_a_rough_session(self):
+        r = self.app("rough")
+        self.assertIn("NOT placed", r.status.cget("text"))
+        self.assertEqual(r.result_code, 1)
+        r.root.destroy()
 
     def test_button_errors_are_shown(self):
         a = self.app("prepare")

@@ -2167,11 +2167,28 @@ class Prepared:
     run_path: Optional[str] = None
 
 
+OPEN_CODES = {(1, -1): 1, (1, 1): 2, (2, -1): 3, (2, 1): 4}    # &vd_openN: the side a half slot opens to
+
+
+def slot_box(jobs: Sequence[str], stock: Optional[Box]) -> Optional[Box]:
+    """The stock box half slots are measured against: the first job header that has one, else the entered box."""
+    for j in jobs:
+        try:
+            b = material_box(read_text(j)[0])
+        except (OSError, VDError):
+            continue
+        if b is not None:
+            return b
+    return stock
+
+
 def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Optional[Box],
                     machine: Dict[str, float], sim: bool = False, template: str = None,
-                    run_path: str = None) -> Prepared:
+                    run_path: str = None, mode: str = "holes") -> Prepared:
     """Step 1 of a job: check everything that can be checked without the probe, then write
-    vd_run.sbp (the probing routine with these settings) for ShopBot to run next."""
+    vd_run.sbp (the probing routine with these settings) for ShopBot to run next.
+    mode: 'holes', 'slots' (half slots, after the bay cut) or 'through' (through slots): for slots
+    each one opens toward its nearest stock-box edge, which the routine needs to know."""
     errs = machine_errors(machine)
     if not 2 <= len(design) <= 6:
         errs.append("enter 2 to 6 reference holes")
@@ -2182,6 +2199,13 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     missing = [j for j in jobs if not os.path.isfile(j)]
     if missing:
         errs.append("file not found: " + "; ".join(missing))
+    opens = {f"open{i}": 0 for i in range(1, 7)}
+    if mode != "holes" and not errs:
+        box = slot_box(jobs, stock)
+        if box is None:
+            errs.append("slots need the stock box (side-B coordinates): it tells which edge each slot opens to")
+        else:
+            opens.update({f"open{i}": OPEN_CODES[open_side(d[0], d[1], box)] for i, d in enumerate(design, 1)})
     if errs:
         return Prepared(False, errs, [])
     units = {job_units(j) for j in jobs} - {None}
@@ -2198,7 +2222,7 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
         tpl = fh.read()
     vals: Dict[str, object] = {k: machine[k] for k in PROBE_FIELDS}
     vals.update(nholes=len(design), hole=round(max(d[2] for d in design) * to_in, 5), sim=int(sim), cal=0,
-                calref=0, detect=0, launched=1, after="align")
+                calref=0, detect=0, launched=1, after="align", rough=0, **opens)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M")
     text = render_run(tpl, vals, note=f"probing {len(design)} holes for: " +
                       ", ".join(os.path.basename(j) for j in jobs))
@@ -2217,8 +2241,11 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
         os.remove(DEFAULT_DATA)          # probe data of the earlier board position is no longer valid
     except OSError:
         pass
-    save_session({"kind": "probe", "jobs": list(jobs), "holes": [list(d) for d in design],
-                  "stock": list(stock) if stock else None, "sim": bool(sim), "prepared": time.time()})
+    prev = load_session()
+    save_session({"kind": "probe", "mode": mode, "jobs": list(jobs), "holes": [list(d) for d in design],
+                  "stock": list(stock) if stock else None, "sim": bool(sim), "prepared": time.time(),
+                  "bay": prev.get("bay") if mode == "slots" else None,
+                  "key": prev.get("key") if mode == "slots" else None})
     path = run_path or RUN_FILE
     with open(path, "wb") as fh:
         fh.write(data)
@@ -2250,7 +2277,7 @@ def prepare_rough(jobs: Sequence[str], bay_file: str, design: List[DesignHole], 
     out = (cur.rsplit(sep, 1)[0] + sep + os.path.basename(ROUGH_DATA)) if sep in cur else ROUGH_DATA
     vals: Dict[str, object] = {k: machine[k] for k in PROBE_FIELDS}
     vals.update(nholes=len(design) + (1 if key else 0), sim=int(sim), cal=0, calref=0, detect=0, launched=1,
-                after="rough", rough=1, out=out, test=0)
+                after="rough", rough=1, out=out, test=0, **{f"open{i}": 0 for i in range(1, 7)})
     text = render_run(tpl, vals, note=f"rough locate of {len(design)} half slots" + (" and the key notch" if key else ""))
     data = text.encode("latin-1", errors="replace")
     if not sim:
@@ -2259,7 +2286,7 @@ def prepare_rough(jobs: Sequence[str], bay_file: str, design: List[DesignHole], 
         os.remove(ROUGH_DATA)
     except OSError:
         pass
-    save_session({"kind": "rough", "jobs": list(jobs), "bay": bay_file, "holes": [list(d) for d in design],
+    save_session({"kind": "rough", "mode": "slots", "jobs": list(jobs), "bay": bay_file, "holes": [list(d) for d in design],
                   "stock": list(stock), "key": list(key) if key else None, "sim": bool(sim), "prepared": time.time()})
     path = run_path or RUN_FILE
     with open(path, "wb") as fh:
@@ -2947,20 +2974,17 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     if argv and argv[0].lower() == "newsession":
         argv = ["--new-session"] + argv[1:]
     # the window: before probing (custom cut), after probing, after a calibration run
-    if argv and argv[0].lower() in ("prepare", "align", "calresult"):
-        word = argv[0].lower()
-        return _window(word, argv[1] if len(argv) > 1 else None)
-    if argv and argv[0].lower() == "rough":
-        # ponytail: no window step yet (phase 4); the result goes to the report and vd_launch.log
+    if argv and argv[0].lower() == "rough" and "--nogui" in argv:
         try:
-            res = rough_from_session(argv[1] if len(argv) > 1 else None)
+            res = rough_from_session(next((x for x in argv[1:] if x != "--nogui"), None))
         except (OSError, VDError) as e:
             print(f"ERROR: {e}")
-            _log(f"rough: {e}")
             return 1
         print(res.report)
-        _log("rough: " + res.report.splitlines()[0])
         return 0 if res.ok else 1
+    if argv and argv[0].lower() in ("prepare", "align", "calresult", "rough"):
+        word = argv[0].lower()
+        return _window(word, argv[1] if len(argv) > 1 else None)
     if argv and argv[0].lower() == "sizes":
         return _sizes_cli(argv[1:])
     if argv and argv[0].lower() == "shelltest":

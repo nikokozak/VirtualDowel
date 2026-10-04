@@ -1,5 +1,5 @@
 """
-Virtual Dowel - vd_app.py  v2.0  (2026-10-02)
+Virtual Dowel - vd_app.py  v2.1  (2026-10-04)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
@@ -8,6 +8,7 @@ The Virtual Dowel window. One window for the whole job:
              probe settings, checks. Start writes vd_run.sbp, which ShopBot runs next.
   align      after probing (vd_run.sbp opens it): aligns every file at once and lists PASS / FAIL.
   calresult  after a probe calibration run: the probe's numbers, saved into the settings.
+  rough      after a rough locate (half slots): places the bay cut file and says what to run next.
 
 All the work is done by vd_align.py; this file is only the window.
 """
@@ -17,6 +18,7 @@ import datetime
 import math
 import os
 import traceback
+import webbrowser
 from typing import Dict, List, Optional, Tuple
 
 import tkinter as tk
@@ -52,7 +54,7 @@ class App:
     def __init__(self, mode: str, data_path: Optional[str] = None, root: Optional[tk.Tk] = None,
                  auto: bool = True):
         self.mode = mode
-        self.data_path = data_path or (va.CAL_DATA if mode == "calresult" else va.DEFAULT_DATA)
+        self.data_path = data_path or {"calresult": va.CAL_DATA, "rough": va.ROUGH_DATA}.get(mode, va.DEFAULT_DATA)
         self.root = root or tk.Tk()
         self.result_code = 3
         self.jobs: List[str] = []
@@ -71,6 +73,8 @@ class App:
             pass
         if mode == "calresult":
             self._build_calresult()
+        elif mode == "rough":
+            self._build_roughresult()
         else:
             self._build_main()
         self._bring_to_front()
@@ -139,6 +143,16 @@ class App:
                 side="left", padx=(0, 4))
         self.subtitle = ttk.Label(bar, text="")
         self.subtitle.pack(side="right")
+        if self.mode == "prepare":
+            lf = ttk.Frame(outer)
+            lf.pack(fill="x", pady=(0, 6))
+            ttk.Label(lf, text="Locate with").pack(side="left")
+            self.loc_var = tk.StringVar(value="holes")
+            for val, txt in (("holes", "Through holes"), ("slots", "Half slots - bay cut first"),
+                             ("through", "Through slots")):
+                ttk.Radiobutton(lf, text=txt, value=val, variable=self.loc_var,
+                                command=self._on_locate_mode).pack(side="left", padx=(10, 0))
+            ttk.Button(lf, text="Guide", command=self.on_guide).pack(side="right")
 
         # side-B files
         jf = ttk.LabelFrame(outer, text="Side-B job files - one per tool", padding=6)
@@ -163,6 +177,8 @@ class App:
         # reference holes
         hf = ttk.LabelFrame(mid, text="Reference holes - side-B design coordinates", padding=6)
         hf.pack(side="left", fill="both", expand=True)
+        self.holes_frame = hf
+        self.mid = mid
         hdr = ttk.Frame(hf)
         hdr.pack(fill="x")
         for t, w in (("#", 3), ("X", 11), ("Y", 11), ("Diameter", 11)):
@@ -183,6 +199,21 @@ class App:
             ttk.Entry(g, textvariable=self.stock_vars[i], width=9).grid(row=1, column=i, padx=2)
         self.stock_note = ttk.Label(sf, text="", wraplength=330, justify="left")
         self.stock_note.pack(anchor="w", pady=(4, 0))
+
+        # half slots: the bay cut file (made in Fusion) and the optional key notch
+        self.bay_var = tk.StringVar()
+        self.key_vars = (tk.StringVar(), tk.StringVar())
+        self.bay_frame = ttk.LabelFrame(outer, text="Half slots - bay cut file from Fusion (placed by the rough locate)",
+                                        padding=6)
+        bf0 = ttk.Frame(self.bay_frame)
+        bf0.pack(fill="x")
+        ttk.Entry(bf0, textvariable=self.bay_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(bf0, text="Choose...", command=self.on_pick_bay).pack(side="left", padx=(6, 0))
+        bf1 = ttk.Frame(self.bay_frame)
+        bf1.pack(fill="x", pady=(4, 0))
+        ttk.Label(bf1, text="Key notch X, Y (only if cut - irregular stock)").pack(side="left")
+        for v in self.key_vars:
+            ttk.Entry(bf1, textvariable=v, width=9).pack(side="left", padx=(6, 0))
 
         # probe settings (prepare) or probe data (align)
         if self.mode == "prepare":
@@ -210,6 +241,7 @@ class App:
         ttk.Button(bf, text="Close", command=self.on_close).pack(side="right")
         if self.mode == "prepare":
             ttk.Button(bf, text="Start probing", command=self.on_start).pack(side="right", padx=(0, 6))
+            self.rough_btn = ttk.Button(bf, text="Start rough locate", command=self.on_start_rough)
             ttk.Button(bf, text="Check", command=self.on_check).pack(side="right", padx=(0, 6))
         else:
             ttk.Button(bf, text="Align", command=self.on_align).pack(side="right", padx=(0, 6))
@@ -257,6 +289,70 @@ class App:
                    + (f", ball off spindle {math.hypot(*ecc):.4f}" if ecc else ""))
         self.cal_label = ttk.Label(g3, text=txt)
         self.cal_label.pack(side="left", padx=8)
+
+    def _on_locate_mode(self) -> None:
+        mode = self.loc_var.get()
+        self.holes_frame.configure(text="Reference holes - side-B design coordinates" if mode == "holes" else
+                                   "Slots - X and Y of the round-end centre and the width - side-B coordinates")
+        if mode == "slots":
+            self.bay_frame.pack(fill="x", pady=(8, 0), after=self.mid)
+            self.rough_btn.pack(side="right", padx=(0, 6))
+        else:
+            self.bay_frame.pack_forget()
+            self.rough_btn.pack_forget()
+
+    def on_pick_bay(self) -> None:
+        got = filedialog.askopenfilename(parent=self.root, title="Bay cut file (.sbp) from Fusion",
+                                         filetypes=[("ShopBot part files", "*.sbp"), ("All files", "*.*")])
+        if got:
+            self.bay_var.set(got)
+
+    def on_guide(self) -> None:
+        path = os.path.join(va.HERE, "docs", "guide.html")
+        if not os.path.isfile(path):
+            self.error("Virtual Dowel", f"The guide is missing: {path}")
+            return
+        webbrowser.open("file:///" + path.replace(os.sep, "/").lstrip("/"))
+
+    def read_key(self) -> Tuple[Optional[Tuple[float, float]], List[str]]:
+        vals = [_num(v.get()) for v in self.key_vars]
+        if all(v.get().strip() == "" for v in self.key_vars):
+            return None, []
+        if any(v is None for v in vals):
+            return None, ["key notch: enter both X and Y, or leave both empty"]
+        return (vals[0], vals[1]), []
+
+    def _build_roughresult(self) -> None:
+        outer = ttk.Frame(self.root, padding=10)
+        outer.pack(fill="both", expand=True)
+        self.status = tk.Label(outer, text="", anchor="w", font=("Segoe UI", 12, "bold"), fg="white",
+                               bg="#2f5d8a", padx=10, pady=6)
+        self.status.pack(fill="x")
+        self.text = tk.Text(outer, height=22, width=100, wrap="word", font=MONO)
+        self.text.pack(fill="both", expand=True, pady=(8, 0))
+        bf = ttk.Frame(outer)
+        bf.pack(fill="x", pady=(8, 0))
+        ttk.Button(bf, text="Close", command=self.on_close).pack(side="right")
+        try:
+            res = va.rough_from_session(self.data_path)
+        except (OSError, va.VDError) as e:
+            self.status.configure(text="Rough locate - bay file NOT placed", bg=RED)
+            self._set_text(f"{e}\n\nType C80 and start the rough locate again.")
+            self.result_code = 1
+            return
+        if res.ok:
+            name = os.path.basename(res.out_path)
+            self.status.configure(text=f"Bay file placed - run {name}", bg=GREEN)
+            self._set_text(f"Next:\n  1. FP {res.out_path}\n     Look at it in Preview first.\n"
+                           "  2. Zero Z with the bay cutter. Do NOT zero X or Y.\n  3. Run it: it cuts the bays.\n"
+                           "  4. Vacuum the slots and bays. Fit the probe.\n  5. Type C80 and click Start probing.\n\n"
+                           + res.report)
+            self.result_code = 0
+        else:
+            self.status.configure(text="Rough locate - bay file NOT placed", bg=RED)
+            self._set_text("Nothing was written. Fix the problems below, then type C80 and start the rough "
+                           "locate again.\n\n" + res.report)
+            self.result_code = 1
 
     def _build_calresult(self) -> None:
         outer = ttk.Frame(self.root, padding=10)
@@ -326,6 +422,14 @@ class App:
         if stock:
             for v, s in zip(self.stock_vars, stock):
                 v.set(_fmt(s))
+        if self.mode == "prepare":
+            self.loc_var.set(sess.get("mode") or "holes")
+            self.bay_var.set(sess.get("bay") or "")
+            key = sess.get("key")
+            if key:
+                for v, k in zip(self.key_vars, key):
+                    v.set(_fmt(k))
+            self._on_locate_mode()
         self._refresh_stock_note()
         self.subtitle.configure(text="Choose the files and holes, then Start probing" if self.mode == "prepare"
                                 else "Results for the probing just done")
@@ -506,6 +610,8 @@ class App:
             errs = va.hole_errors(holes, m["tip"])
         if not self.jobs:
             errs.append("add the side-B job files")
+        elif self.loc_var.get() != "holes" and va.slot_box(self.jobs, stock) is None:
+            errs.append("slots need the stock box (side-B coordinates): it tells which edge each slot opens to")
         if errs:
             self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
             self._set_status("Not ready", RED)
@@ -525,7 +631,7 @@ class App:
             self._set_status("Not ready", RED)
             return
         sim = bool(self.sim_var.get())
-        prep = va.prepare_probing(self.jobs, holes, stock, m, sim=sim)
+        prep = va.prepare_probing(self.jobs, holes, stock, m, sim=sim, mode=self.loc_var.get())
         if not prep.ok:
             lines = self._show_checks(prep.checks)
             self._set_text("Not started:\n\n" + "\n".join("  - " + e for e in prep.errors)
@@ -534,6 +640,29 @@ class App:
             return
         self.result_code = 0
         self.root.destroy()          # ShopBot continues with vd_run.sbp
+
+    def on_start_rough(self) -> None:
+        holes, stock, m, errs = self._gather()
+        key, e2 = self.read_key()
+        errs += e2
+        bay = self.bay_var.get().strip()
+        if not bay:
+            errs.append("choose the bay cut file")
+        if not self.jobs:
+            errs.append("add the side-B job files")
+        if errs:
+            self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
+            self._set_status("Not ready", RED)
+            return
+        if stock is None:
+            stock = va.slot_box(self.jobs, None)
+        prep = va.prepare_rough(self.jobs, bay, holes, stock, m, key=key, sim=bool(self.sim_var.get()))
+        if not prep.ok:
+            self._set_text("Not started:\n\n" + "\n".join("  - " + e for e in prep.errors))
+            self._set_status("Not ready", RED)
+            return
+        self.result_code = 0
+        self.root.destroy()          # ShopBot continues with the rough locate in vd_run.sbp
 
     def on_advanced(self) -> None:
         top = tk.Toplevel(self.root)

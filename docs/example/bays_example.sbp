@@ -1,0 +1,21 @@
+'Virtual Dowel example bay file - DRY RUN ONLY (README H1) - NOT a real bay cut
+'Bays for half slots at X 1.5 Y 15 (opens -X) and X 22.5 Y 15 (opens +X) - 24 x 30 in stock
+'UNITS:Inches
+SA
+IF %(25)=1 THEN GOTO UNIT_ERROR
+MS,1.0,0.5
+JZ,3.5
+J2,-0.6,15.0
+M3,-0.6,15.0,1.6
+M3,2.4,15.0,1.6
+M3,-0.6,15.0,1.6
+JZ,3.5
+J2,24.6,15.0
+M3,24.6,15.0,1.6
+M3,21.6,15.0,1.6
+M3,24.6,15.0,1.6
+JZ,3.5
+END
+UNIT_ERROR:
+MSGBOX(This file is in inches,0,Units)
+END
