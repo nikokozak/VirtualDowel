@@ -100,7 +100,7 @@ Rules for any `.sbp` code that you write or generate:
 
 ## 6. Safety invariants
 
-- The script deletes only files that it recorded as its own outputs. It never overwrites job files, sidecars, or custom cuts that are not Virtual Dowel's.
+- The script deletes or overwrites an output only if Virtual Dowel wrote it: the first line is the aligned-file header (`is_aligned_file`). An occupied output name stops the alignment of that file. It never overwrites job files, sidecars, or custom cuts that are not Virtual Dowel's.
 - `_VD` is written only on PASS. FAIL deletes the older `_VD` of that job.
 - Pre-checks (`dry=True`) write nothing and delete nothing.
 - A simulated run never removes real outputs. A calibration never touches job data or outputs.

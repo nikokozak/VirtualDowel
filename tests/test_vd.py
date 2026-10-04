@@ -1067,12 +1067,42 @@ class TestEndToEnd(unittest.TestCase):
         data = self.probe(0.2, 1.0, 1.0)
         stale = os.path.join(self.tmp, "sideB_VD.sbp")
         with open(stale, "w") as fh:
-            fh.write("old aligned file\n")
+            fh.write(f"'==== {va.MARKER} - vd_align.py v1.9 ====\nold aligned file\n")
         res = va.run_alignment(data, self.job, [(12.0, 1.0, 0.5), (12.0, 28.9, 0.625)])
         self.assertFalse(res.ok)
         self.assertIsNone(res.out_path)
         self.assertFalse(os.path.exists(stale))
         self.assertIn("FAIL", res.report)
+
+    def test_files_virtual_dowel_did_not_write_are_never_deleted_or_overwritten(self):
+        data = self.probe(0.2, 1.0, 1.0)
+        mine = os.path.join(self.tmp, "sideB_VD.sbp")          # the user's own file with the output's name
+        with open(mine, "w") as fh:
+            fh.write("my own file\n")
+        for design in (DESIGN, [(12.0, 1.0, 0.5), (12.0, 28.9, 0.625)]):     # would PASS / would FAIL
+            with self.assertRaises(va.VDError) as cm:
+                va.run_alignment(data, self.job, design)
+            self.assertIn("not written by Virtual Dowel", str(cm.exception))
+        self.assertEqual(open(mine).read(), "my own file\n")
+        notes = os.path.join(self.tmp, "notes.txt")
+        with open(notes, "w") as fh:
+            fh.write("notes\n")
+        with self.assertRaises(va.VDError):
+            va.run_alignment(data, self.job, DESIGN, out_path=notes)
+        self.assertEqual(open(notes).read(), "notes\n")
+        # a foreign file with the other output name (_VDSIM) is left alone
+        os.remove(mine)
+        sim = os.path.join(self.tmp, "sideB_VDSIM.sbp")
+        with open(sim, "w") as fh:
+            fh.write("mine too\n")
+        res = va.run_alignment(data, self.job, DESIGN)
+        self.assertTrue(res.ok, res.report)
+        self.assertEqual(open(sim).read(), "mine too\n")
+        # a recorded output that the user replaced with their own file survives a new session
+        with open(res.out_path, "w") as fh:
+            fh.write("replaced by the user\n")
+        va.new_session()
+        self.assertEqual(open(res.out_path).read(), "replaced by the user\n")
 
     def test_units_mismatch(self):
         data = self.probe(0.2, 1.0, 1.0)
@@ -1276,7 +1306,7 @@ class TestEndToEnd(unittest.TestCase):
         # entries written by v1.3 (plain paths, probing run unknown) are treated as old
         legacy = os.path.join(self.tmp, "legacy_VD.sbp")
         with open(legacy, "w") as fh:
-            fh.write("old")
+            fh.write(f"'==== {va.MARKER} - vd_align.py v1.3 ====\nold\n")
         st = va._load_state()
         st["outputs"].append(legacy)
         va._save_state(st)

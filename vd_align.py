@@ -1392,6 +1392,9 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
     real = lambda p: os.path.normcase(os.path.realpath(p))   # noqa: E731
     if real(out_path) in (real(job_path), real(data_path)):
         raise VDError("the output file must not be the job file or the probe data file")
+    if not dry and os.path.exists(out_path) and not is_aligned_file(out_path):
+        raise VDError(f"{out_path} exists and was not written by Virtual Dowel - rename or move it, "
+                      "then align again")
     retired: List[str] = []
     if not dry:
         # a simulated run only replaces simulated outputs; real aligned files stay
@@ -1400,7 +1403,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
         # never leave an older aligned file behind when this run fails
         stale_set = {out_path, default_out_path(job_path, True)} | ({default_out_path(job_path, False)} if not pd.sim else set())
         for stale in stale_set:
-            if os.path.exists(stale):
+            if os.path.exists(stale) and is_aligned_file(stale):
                 os.remove(stale)
 
     fails: List[str] = []
@@ -1579,6 +1582,16 @@ def record_output(path: str, data_path: Optional[str] = None) -> None:
     _save_state(st)
 
 
+def is_aligned_file(path: str) -> bool:
+    """True if Virtual Dowel wrote this file: its first line is the aligned-file header (build_output).
+    Nothing else is ever deleted or overwritten as an output."""
+    try:
+        with open(path, "r", encoding="latin-1") as fh:
+            return fh.readline().startswith(f"'==== {MARKER}")
+    except OSError:
+        return False
+
+
 def _remove_outputs(keep) -> List[str]:
     st = _load_state()
     kept, removed = [], []
@@ -1587,7 +1600,7 @@ def _remove_outputs(keep) -> List[str]:
             kept.append(o)
             continue
         try:
-            if os.path.exists(o["path"]):
+            if os.path.exists(o["path"]) and is_aligned_file(o["path"]):    # replaced by the user: left alone
                 os.remove(o["path"])
                 removed.append(o["path"])
         except OSError:
