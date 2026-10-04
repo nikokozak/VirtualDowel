@@ -1,0 +1,2 @@
+# keep every file byte-for-byte: SB3 needs the .sbp / .bat files exactly as they are (CRLF)
+* -text

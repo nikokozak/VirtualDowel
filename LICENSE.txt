@@ -1,0 +1,30 @@
+Virtual Dowel
+Copyright (c) 2026 Nikolai Kozak. All rights reserved.
+
+PROPRIETARY SOFTWARE - NOT OPEN SOURCE
+
+This software, including its source code, OpenSBP routines, scripts, tests and
+documentation (the "Software"), is the property of Nikolai Kozak.
+
+No license or other right is granted, by implication or otherwise, to use,
+copy, modify, merge, publish, distribute, sublicense, sell or create derivative
+works of the Software, in whole or in part, except with the prior written
+permission of the copyright holder. Any permission given is limited to its
+written terms.
+
+DISCLAIMER. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+THE SOFTWARE READS AND WRITES MACHINE-CONTROL FILES FOR CNC EQUIPMENT AND
+ANY USE OF IT IS AT THE USER'S OWN RISK. THE USER IS RESPONSIBLE FOR CHECKING
+EVERY FILE BEFORE RUNNING IT AND FOR THE SAFE OPERATION OF THE MACHINE.
+
+LIMITATION OF LIABILITY. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN
+NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, INCLUDING DAMAGE TO MACHINES, TOOLING, WORKPIECES OR OTHER PROPERTY,
+OR PERSONAL INJURY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+ShopBot and OpenSBP are trademarks of ShopBot Tools, Inc. Fusion is a
+trademark of Autodesk, Inc. The Software is not affiliated with or endorsed by
+ShopBot Tools, Inc. or Autodesk, Inc.

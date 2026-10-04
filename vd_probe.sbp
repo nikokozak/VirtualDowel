@@ -1,0 +1,502 @@
+'=====================================================================
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.0  (2026-10-02)
+' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
+'
+' Finds the centers of two or more reference through-holes with the
+' ShopBot digitizing probe and writes the raw touch data for
+' vd_align.py, which then rotates and shifts the side-B job file so it
+' lines up with the holes.
+'
+' Normal use: type the Virtual Dowel custom cut (C80) in ShopBot. It opens the
+' Virtual Dowel window - choose files - holes - probe settings there - and the
+' window writes vd_run.sbp from THIS file with those settings filled in.
+' This file still runs on its own: FP it after editing the settings below.
+' Dry run : set &vd_sim = 1 below. SIM mode never moves the machine.
+'
+' Do NOT re-zero X or Y between running this routine and cutting.
+'
+' Every PAUSE is a whole number of seconds: on the user's SB3 a PAUSE
+' under 1 second stopped the file until the operator continued it.
+'=====================================================================
+'
+'---------------- SETTINGS - distances in INCHES - speeds in IN/SEC ---
+&vd_pin = 1          'input number the probe is wired to - 1 to 8
+&vd_trig = 0         'input state when the tip is DEFLECTED - 0 for a normally-closed probe
+&vd_tip = 0.125      'probe ball diameter - used for the search distance and reporting
+&vd_hole = 0.625     'diameter of the LARGEST reference hole - sets the search distance
+&vd_nholes = 2       'number of reference holes - 2 or more
+&vd_passes = 2       'fine passes per hole - use 10 for a repeatability test
+&vd_spin180 = 0      '1 = probe each hole again after you turn the spindle 180 deg by hand
+&vd_depth = 0.30     'lower the tip this far below where you park it over the hole
+&vd_margin = 0.08    'search this far past the expected wall before giving up
+&vd_backoff = 0.03   'retreat distance before the slow re-touch
+&vd_fast = 0.40      'fast touch and positioning speed
+&vd_slow = 0.08      'slow touch speed
+&vd_zspd = 0.30      'Z speed for lowering into and lifting out of the hole
+&vd_test = 1         '1 = finger test of the probe before any motion
+&vd_c7 = 1           '1 = run C7 - spindle off - at the start
+&vd_sim = 0          '1 = SIMULATION - no motion - no probe needed - for a dry run
+&vd_detect = 0       '1 = find the probe input and its deflected state automatically - calibration
+&vd_cal = 0          '1 = probe calibration - one reference hole of known size
+&vd_calref = 0       'calibration - measured diameter of the reference hole
+&vd_launched = 0     '1 = written by the Virtual Dowel window - it has already removed old aligned files
+&vd_after = "align"  'what the window shows when probing is done - align or calresult
+'data file written by this routine - and the Python and script it starts afterwards.
+'vd_install.bat sets all three. The data file must stay next to vd_align.py - the script reads it there.
+'SB3 cannot start a .bat file with SHELL - so it starts python.exe directly.
+&vd_out = "C:\SbParts\VirtualDowel\vd_probe_data.csv"
+&vd_pyexe = "C:\SbParts\VirtualDowel\venv\Scripts\python.exe"
+&vd_script = "C:\SbParts\VirtualDowel\vd_align.py"
+'---------------------------------------------------------------------
+'
+'---------------- SETUP ----------------
+&vd_ms0 = %(71)
+&vd_mz0 = %(73)
+&vd_units = %(25)
+&vd_mode = %(22)
+&vd_u = 1
+IF &vd_units = 1 THEN &vd_u = 25.4
+&vd_tip = &vd_tip * &vd_u
+&vd_hole = &vd_hole * &vd_u
+&vd_depth = &vd_depth * &vd_u
+&vd_margin = &vd_margin * &vd_u
+&vd_backoff = &vd_backoff * &vd_u
+&vd_fast = &vd_fast * &vd_u
+&vd_slow = &vd_slow * &vd_u
+&vd_zspd = &vd_zspd * &vd_u
+&vd_calref = &vd_calref * &vd_u
+&vd_idx = &vd_pin + 50
+&vd_idle = 1 - &vd_trig
+&vd_r = (&vd_hole - &vd_tip) / 2
+&vd_maxd = &vd_r + &vd_margin
+&vd_slowd = 2 * &vd_backoff + 0.02 * &vd_u
+&vd_inhole = 0
+&vd_hit = 0
+&vd_xc = 0
+&vd_yc = 0
+&vd_x0 = 0
+&vd_y0 = 0
+&vd_z0 = 0
+&vd_zp = 0
+&vd_px = %(1)
+&vd_py = %(2)
+&vd_hmin = 2
+IF &vd_cal = 1 THEN &vd_hmin = 1
+IF &vd_nholes < &vd_hmin THEN GOTO vd_err_cfg
+IF &vd_passes < 1 THEN GOTO vd_err_cfg
+IF &vd_r < 0.02 * &vd_u THEN GOTO vd_err_cfg
+IF &vd_pin < 1 THEN GOTO vd_err_cfg
+IF &vd_pin > 8 THEN GOTO vd_err_cfg
+IF &vd_sim = 1 THEN GOTO vd_mode_ok
+IF &vd_mode = 1 THEN GOTO vd_err_preview
+vd_mode_ok:
+SA
+'
+'---------------- DATA FILE - opened first so an aborted run never leaves old data behind ----
+OPEN &vd_out FOR OUTPUT AS #1
+WRITE #1; "VD,1,"; &vd_units; ","; &vd_sim; ","; &vd_tip; ","; &vd_hole; ","; &vd_nholes; ","; &vd_passes; ","; &vd_spin180; ","; &vd_pin; ","; &vd_trig; ","; &vd_mode
+WRITE #1; "CFG,"; &vd_depth; ","; &vd_margin; ","; &vd_backoff; ","; &vd_fast; ","; &vd_slow; ","; &vd_zspd
+&vd_date = %(146)
+&vd_time = %(147)
+WRITE #1; "DT,"; &vd_date; " "; &vd_time
+IF &vd_cal = 0 THEN GOTO vd_cal_hdr_done
+WRITE #1; "CAL,"; &vd_calref
+vd_cal_hdr_done:
+'
+MSGBOX(VIRTUAL DOWEL probing. The spindle must be OFF with the digitizing probe in the collet and its cable plugged in. You will jog the probe over each reference hole in turn. Continue?,OKCancel,Virtual Dowel)
+IF &msganswer = "Cancel" THEN GOTO vd_quit
+IF &vd_sim = 1 THEN GOTO vd_hw_done
+'new session: the script deletes aligned files from earlier runs - they belong to an old board position.
+'The window has done this already - doing it again is harmless and covers an old vd_run.sbp run again.
+'A calibration keeps them.
+IF &vd_cal = 1 THEN GOTO vd_ns_done
+&vd_cmd = &vd_pyexe & " " & &vd_script & " newsession"
+SHELL, &vd_cmd, 1, SYNC
+vd_ns_done:
+IF &vd_c7 = 1 THEN C7
+'
+'---------------- FIND THE PROBE INPUT - calibration ----------------
+'Every input is read at rest - the one that changes while the tip is held over is the probe.
+IF &vd_detect = 0 THEN GOTO vd_detect_done
+&vd_i1 = %(51)
+&vd_i2 = %(52)
+&vd_i3 = %(53)
+&vd_i4 = %(54)
+&vd_i5 = %(55)
+&vd_i6 = %(56)
+&vd_i7 = %(57)
+&vd_i8 = %(58)
+MSGBOX(Finding the probe input. After you click OK press the probe tip sideways with a finger and HOLD it for about 3 seconds - then let go. You have 20 seconds.,0,Virtual Dowel - probe input)
+&vd_t = 0
+&vd_k = 0
+vd_det_1:
+IF %(51) = &vd_i1 THEN GOTO vd_det_2
+&vd_k = 1
+GOTO vd_det_found
+vd_det_2:
+IF %(52) = &vd_i2 THEN GOTO vd_det_3
+&vd_k = 2
+GOTO vd_det_found
+vd_det_3:
+IF %(53) = &vd_i3 THEN GOTO vd_det_4
+&vd_k = 3
+GOTO vd_det_found
+vd_det_4:
+IF %(54) = &vd_i4 THEN GOTO vd_det_5
+&vd_k = 4
+GOTO vd_det_found
+vd_det_5:
+IF %(55) = &vd_i5 THEN GOTO vd_det_6
+&vd_k = 5
+GOTO vd_det_found
+vd_det_6:
+IF %(56) = &vd_i6 THEN GOTO vd_det_7
+&vd_k = 6
+GOTO vd_det_found
+vd_det_7:
+IF %(57) = &vd_i7 THEN GOTO vd_det_8
+&vd_k = 7
+GOTO vd_det_found
+vd_det_8:
+IF %(58) = &vd_i8 THEN GOTO vd_det_none
+&vd_k = 8
+GOTO vd_det_found
+vd_det_none:
+PAUSE 1
+&vd_t = &vd_t + 1
+IF &vd_t > 20 THEN GOTO vd_err_detect
+GOTO vd_det_1
+vd_det_found:
+&vd_pin = &vd_k
+&vd_idx = &vd_pin + 50
+&vd_trig = %(&vd_idx)
+&vd_idle = 1 - &vd_trig
+WRITE #1; "DET,"; &vd_pin; ","; &vd_trig
+'wait for the tip to be let go
+&vd_t = 0
+vd_det_rel:
+IF %(&vd_idx) = &vd_idle THEN GOTO vd_detect_done
+PAUSE 1
+&vd_t = &vd_t + 1
+IF &vd_t > 10 THEN GOTO vd_err_notidle
+GOTO vd_det_rel
+vd_detect_done:
+'
+'---------------- PROBE CHECK ----------------
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_err_notidle
+IF &vd_detect = 1 THEN GOTO vd_hw_done
+IF &vd_test = 0 THEN GOTO vd_hw_done
+MSGBOX(Probe test. After you click OK press the probe tip sideways with a finger and HOLD it for about 2 seconds - then let go. You have 20 seconds.,0,Virtual Dowel - probe test)
+&vd_t = 0
+vd_test_wait:
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_test_seen
+PAUSE 1
+&vd_t = &vd_t + 1
+IF &vd_t > 20 THEN GOTO vd_err_test
+GOTO vd_test_wait
+vd_test_seen:
+&vd_t = 0
+vd_test_rel:
+IF %(&vd_idx) = &vd_idle THEN GOTO vd_hw_done
+PAUSE 1
+&vd_t = &vd_t + 1
+IF &vd_t > 10 THEN GOTO vd_err_notidle
+GOTO vd_test_rel
+'
+vd_hw_done:
+'---------------- MAIN LOOP - one hole at a time ----------------
+'&vd_or records the PHYSICAL spindle orientation - 0 as found - 1 after a half turn.
+'It is not reset per hole because the spindle stays where the operator left it.
+&vd_h = 0
+&vd_or = 0
+vd_next_hole:
+&vd_h = &vd_h + 1
+IF &vd_h > &vd_nholes THEN GOTO vd_all_done
+GOSUB vd_locate
+GOSUB vd_probe_hole
+IF &vd_spin180 = 0 THEN GOTO vd_next_hole
+MSGBOX(Now turn the spindle by hand about 180 degrees - spindle OFF. The probe is lifted above the hole. Click OK when done.,0,Virtual Dowel)
+&vd_or = 1 - &vd_or
+&vd_x0 = &vd_xc
+&vd_y0 = &vd_yc
+GOSUB vd_probe_hole
+GOTO vd_next_hole
+'
+vd_all_done:
+WRITE #1; "END,"; &vd_nholes
+CLOSE #1
+MS, &vd_ms0, &vd_mz0
+MSGBOX(Probing finished. Click OK to open the Virtual Dowel window with the results.,OKCancel,Virtual Dowel)
+IF &msganswer = "Cancel" THEN GOTO vd_end
+&vd_cmd = &vd_pyexe & " " & &vd_script & " " & &vd_after
+SHELL, &vd_cmd, 1, SYNC
+IF &vd_cal = 1 THEN GOTO vd_end
+MSGBOX(For each file that PASSED - fit its cutter - zero Z only - then run its _VD.sbp version. Do NOT re-zero X or Y. If no Virtual Dowel window appeared double-click vd_align.bat in the VirtualDowel folder.,64,Virtual Dowel)
+vd_end:
+END
+'
+'=====================================================================
+' SUBROUTINES   (deepest GOSUB nesting is 5 - including the input handler)
+'=====================================================================
+'
+'---- let the operator park the probe over the next hole ----
+vd_locate:
+IF &vd_sim = 1 THEN GOTO vd_locate_sim
+PRINT "Virtual Dowel - hole "; &vd_h; " of "; &vd_nholes
+MSGBOX(Jog the probe tip over the CENTER of the next reference hole and about 0.1 inch or 3 mm above the surface. Use slow keypad speed near the work. Press ESC to close the keypad when you are done.,64,Virtual Dowel)
+SK
+MSGBOX(Is the probe tip over the hole center and a little above the surface? Yes to probe it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
+IF &msganswer = "No" THEN GOTO vd_locate
+IF &msganswer = "Cancel" THEN GOTO vd_abort
+&vd_x0 = %(1)
+&vd_y0 = %(2)
+&vd_z0 = %(3)
+RETURN
+vd_locate_sim:
+INPUT "SIMULATION - type X then Y then diameter of this hole with commas between them" &vd_sx, &vd_sy, &vd_sd
+&vd_x0 = &vd_sx
+&vd_y0 = &vd_sy
+&vd_z0 = %(3)
+'synthetic square hole - true center deliberately offset from what was typed
+&vd_shx = &vd_sx + 0.020 * &vd_u
+&vd_shy = &vd_sy - 0.012 * &vd_u
+&vd_rs = (&vd_sd - &vd_tip) / 2
+RETURN
+'
+'---- probe one hole: lower in - coarse pass - fine passes - lift out ----
+vd_probe_hole:
+&vd_mx = &vd_x0
+&vd_my = &vd_y0
+GOSUB vd_moveto
+&vd_xc = &vd_x0
+&vd_yc = &vd_y0
+&vd_hit = 0
+'search limit: largest hole until this hole has been measured once
+&vd_lim = &vd_maxd
+IF &vd_sim = 1 THEN GOTO vd_plunge_sim
+MS, &vd_fast, &vd_zspd
+'the probe should read idle - wait a second only if it does not
+IF %(&vd_idx) = &vd_idle THEN GOTO vd_plunge_arm
+PAUSE 1
+vd_plunge_arm:
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_err_pretrig
+ON INP(&vd_pin, &vd_trig) GOSUB vd_onhit
+IF &vd_hit = 1 THEN GOTO vd_err_false
+MZ, &vd_z0 - &vd_depth
+ON INP(&vd_pin, &vd_trig)
+&vd_inhole = 1
+IF &vd_hit = 1 THEN GOTO vd_plunge_hit
+PAUSE 1
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_plunge_hit
+&vd_zp = %(3)
+GOTO vd_plunged
+vd_plunge_sim:
+&vd_zp = &vd_z0 - &vd_depth
+&vd_inhole = 1
+vd_plunged:
+'coarse pass - single fast touches
+&vd_ps = 0
+GOSUB vd_center_pass
+'from now on search only a margin past THIS hole's measured wall
+&vd_lim = &vd_hx + &vd_margin
+IF &vd_hy > &vd_hx THEN &vd_lim = &vd_hy + &vd_margin
+'fine passes - fast touch then slow re-touch
+&vd_ps = 1
+vd_fine_loop:
+IF &vd_ps > &vd_passes THEN GOTO vd_fine_done
+GOSUB vd_center_pass
+&vd_ps = &vd_ps + 1
+GOTO vd_fine_loop
+vd_fine_done:
+IF &vd_sim = 0 THEN GOSUB vd_lift
+&vd_inhole = 0
+WRITE #1; "H,"; &vd_h; ","; &vd_or; ","; &vd_xc; ","; &vd_yc; ","; &vd_zp
+RETURN
+vd_plunge_hit:
+PAUSE 1
+GOSUB vd_lift
+&vd_inhole = 0
+MSGBOX(The probe touched something while lowering. It is probably not over the hole or the hole is shallower than the probing depth. Jog it again.,48,Virtual Dowel)
+GOSUB vd_locate
+GOTO vd_probe_hole
+'
+'---- one centering pass: +X -X then +Y -Y from the current center ----
+vd_center_pass:
+&vd_ax = 1
+&vd_sg = 1
+GOSUB vd_touch_rec
+&vd_p1 = &vd_cx
+&vd_sg = -1
+GOSUB vd_touch_rec
+&vd_xc = (&vd_p1 + &vd_cx) / 2
+&vd_hx = (&vd_p1 - &vd_cx) / 2
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_ax = 2
+&vd_sg = 1
+GOSUB vd_touch_rec
+&vd_p1 = &vd_cy
+&vd_sg = -1
+GOSUB vd_touch_rec
+&vd_yc = (&vd_p1 + &vd_cy) / 2
+&vd_hy = (&vd_p1 - &vd_cy) / 2
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+RETURN
+'
+'---- touch the wall (fine passes: fast - back off - slow) - write it - go back to center ----
+vd_touch_rec:
+&vd_spd = &vd_fast
+&vd_dist = &vd_lim
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_miss
+IF &vd_ps = 0 THEN GOTO vd_touch_write
+&vd_mx = &vd_cx
+&vd_my = &vd_cy
+IF &vd_ax = 1 THEN &vd_mx = &vd_cx - &vd_sg * &vd_backoff
+IF &vd_ax = 2 THEN &vd_my = &vd_cy - &vd_sg * &vd_backoff
+GOSUB vd_moveto
+&vd_spd = &vd_slow
+&vd_dist = &vd_slowd
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_miss
+vd_touch_write:
+WRITE #1; "T,"; &vd_h; ","; &vd_or; ","; &vd_ps; ","; &vd_ax; ","; &vd_sg; ","; &vd_cx; ","; &vd_cy; ","; &vd_cz; ","; &vd_cbx; ","; &vd_cby
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+RETURN
+'
+'---- guarded move along one axis until the probe triggers ----
+' in : &vd_ax 1=X 2=Y   &vd_sg +1/-1   &vd_dist   &vd_spd
+' out: &vd_hit 1/0   &vd_cx &vd_cy &vd_cz   &vd_cbx &vd_cby (table position of the X/Y zero)
+vd_touch:
+&vd_hit = 0
+&vd_tx = &vd_px
+&vd_ty = &vd_py
+IF &vd_ax = 1 THEN &vd_tx = &vd_px + &vd_sg * &vd_dist
+IF &vd_ax = 2 THEN &vd_ty = &vd_py + &vd_sg * &vd_dist
+IF &vd_sim = 1 THEN GOTO vd_touch_sim
+MS, &vd_spd, &vd_zspd
+'start position along the probing axis
+&vd_s0 = %(1)
+IF &vd_ax = 2 THEN &vd_s0 = %(2)
+'ON INP only fires on a CHANGE so the probe must read idle before arming.
+'It normally does after the back-off move - wait a second only if it does not.
+IF %(&vd_idx) = &vd_idle THEN GOTO vd_touch_arm
+PAUSE 1
+vd_touch_arm:
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_err_pretrig
+ON INP(&vd_pin, &vd_trig) GOSUB vd_onhit
+IF &vd_hit = 1 THEN GOTO vd_err_false
+M2, &vd_tx, &vd_ty
+ON INP(&vd_pin, &vd_trig)
+IF &vd_hit = 0 THEN GOTO vd_touch_ret
+'let the machine come to a complete stop before reading where the contact was
+PAUSE 1
+&vd_cx = %(1)
+&vd_cy = %(2)
+&vd_cz = %(3)
+&vd_cbx = %(6)
+&vd_cby = %(7)
+&vd_px = &vd_cx
+&vd_py = &vd_cy
+'a real contact stops SHORT of the target and leaves the tip deflected.
+'%(6)/%(7) do not follow the tool - they hold the table position of the X/Y zero - so use %(1)/%(2).
+IF %(&vd_idx) = &vd_idle THEN GOTO vd_err_false
+&vd_trav = (%(1) - &vd_s0) * &vd_sg
+IF &vd_ax = 2 THEN &vd_trav = (%(2) - &vd_s0) * &vd_sg
+&vd_rem = &vd_dist - &vd_trav
+IF &vd_rem < 0.002 * &vd_u THEN GOTO vd_err_false
+GOTO vd_touch_ret
+vd_touch_sim:
+&vd_cx = &vd_px
+&vd_cy = &vd_py
+IF &vd_ax = 1 THEN &vd_cx = &vd_shx + &vd_sg * &vd_rs
+IF &vd_ax = 2 THEN &vd_cy = &vd_shy + &vd_sg * &vd_rs
+&vd_d = (&vd_cx - &vd_px) * &vd_sg
+IF &vd_ax = 2 THEN &vd_d = (&vd_cy - &vd_py) * &vd_sg
+IF &vd_d > &vd_dist THEN GOTO vd_touch_ret
+IF &vd_d < 0 THEN GOTO vd_touch_ret
+&vd_cz = &vd_zp
+&vd_cbx = %(6)
+&vd_cby = %(7)
+&vd_px = &vd_cx
+&vd_py = &vd_cy
+&vd_hit = 1
+vd_touch_ret:
+RETURN
+'
+'---- input interrupt handler: motion has already stopped ----
+vd_onhit:
+ON INP(&vd_pin, &vd_trig)
+&vd_hit = 1
+RETURN
+'
+'---- plain XY move at the current Z - SIM mode only updates the position variables ----
+vd_moveto:
+&vd_px = &vd_mx
+&vd_py = &vd_my
+IF &vd_sim = 1 THEN GOTO vd_moveto_ret
+MS, &vd_fast, &vd_zspd
+M2, &vd_mx, &vd_my
+&vd_px = %(1)
+&vd_py = %(2)
+vd_moveto_ret:
+RETURN
+'
+'---- lift back to the park height ----
+vd_lift:
+MS, &vd_fast, &vd_zspd
+MZ, &vd_z0
+RETURN
+'
+'=====================================================================
+' ERRORS
+'=====================================================================
+vd_err_miss:
+MSGBOX(No contact within the search distance. Park closer to the hole center - and check the vd_hole setting and that the probe triggers. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_pretrig:
+MSGBOX(The probe reads DEFLECTED before a move. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_false:
+MSGBOX(The probe triggered without a solid contact - or only at the very end of the search. Park closer to the hole center and try again. If it repeats check the probe cable and connector. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_lift_abort:
+IF &vd_sim = 1 THEN GOTO vd_abort
+IF &vd_inhole = 0 THEN GOTO vd_abort
+MS, &vd_fast, &vd_zspd
+M2, &vd_xc, &vd_yc
+MZ, &vd_z0
+&vd_inhole = 0
+GOTO vd_abort
+vd_abort:
+CLOSE #1
+MS, &vd_ms0, &vd_mz0
+MSGBOX(Probing aborted - no alignment data was produced. Fix the problem and run the routine again.,48,Virtual Dowel)
+END
+vd_err_notidle:
+MSGBOX(The probe input reads DEFLECTED or the probe is unplugged. Check the cable and the probe input settings - or run the probe calibration to find them.,16,Virtual Dowel)
+GOTO vd_quit
+vd_err_test:
+MSGBOX(The probe did not trigger during the finger test. Check the cable and the probe input settings - or run the probe calibration to find them. Set vd_test to 0 to skip this test.,16,Virtual Dowel)
+GOTO vd_quit
+vd_err_detect:
+MSGBOX(No input changed while the probe tip was held over. Check that the probe cable is plugged in and try again.,16,Virtual Dowel)
+GOTO vd_quit
+vd_quit:
+CLOSE #1
+MS, &vd_ms0, &vd_mz0
+END
+vd_err_cfg:
+MSGBOX(Settings problem - need at least 2 holes and 1 pass - probe input 1 to 8 - and a hole larger than the probe tip.,16,Virtual Dowel)
+GOTO vd_quit0
+vd_err_preview:
+MSGBOX(ShopBot is in PREVIEW mode. Switch to MOVE mode to probe - or set vd_sim to 1 for a dry run.,48,Virtual Dowel)
+GOTO vd_quit0
+vd_quit0:
+MS, &vd_ms0, &vd_mz0
+END

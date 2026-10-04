@@ -1,0 +1,50 @@
+'1002
+'Side B - flipped end over end (Setup 2: Z and Y inverted)
+'Post Processor Version: 44083
+ON INPUT(5,0) MSGBOX(Spindle lockout switch is off., OkOnly, Spindle Lockout Warning)
+SA
+IF %(25)=1 THEN GOTO UNIT_ERROR
+&PWMaterial = 0.75
+&PWZorigin = Part Surface
+'2D Pocket1
+&Tool = 1
+C9
+TR,18000
+C6
+PAUSE 2
+MS,2.,0.5
+J3,1.5,2.,0.6
+J3,,,0.2
+M3,,,-0.25
+M3,5.,,
+M3,,8.,
+CG,,6.,9.,1.,0.,,-1
+M3,10.,,
+CG,,,11.,0.,1.,,1
+M3,,14.,
+J3,,,0.6
+'2D Contour1
+&Tool = 2
+C9
+TR,16000
+SO 1,1
+PAUSE 2
+MS,1.,0.4
+J3,20.,20.,0.6
+M3,,,-0.1
+CG,,20.,22.,0.,1.,,-1
+CG,,20.,20.,0.,-1.,,-1
+M3,,,-0.2
+CG,,20.,22.,0.,1.,,-1
+CG,,20.,20.,0.,-1.,,-1
+J3,,,0.6
+SO 1,0
+C7
+JZ,0.6
+JH
+END
+
+
+UNIT_ERROR:
+CN, 91
+END

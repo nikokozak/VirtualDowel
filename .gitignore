@@ -1,0 +1,20 @@
+# Virtual Dowel - files made on the machine, not part of the source
+venv/
+__pycache__/
+*.pyc
+vd_state.json
+vd_machine.json
+vd_run.sbp
+vd_start.sbp
+vd_cal_data.csv
+vd_launch.log
+vd_settings.json
+vd_probe_data.csv
+vd_selftest_result.txt
+vd_selftest_literal.txt
+vd_selftest_variable.txt
+vd_selftest_chars.txt
+*_VD.sbp
+*_VDSIM.sbp
+*_report.txt
+*.vdholes.txt

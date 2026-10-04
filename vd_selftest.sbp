@@ -1,0 +1,184 @@
+'=====================================================================
+' VIRTUAL DOWEL  -  vd_selftest.sbp   v1.6  (2026-09-29)
+' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
+' Offline check of every OpenSBP feature Virtual Dowel relies on.
+' Contains NO motion commands - safe with or without the machine.
+' Run it in PREVIEW mode:  FP  C:\SbParts\VirtualDowel\vd_selftest.sbp
+'
+' It writes vd_selftest_result.txt into the SAME folder as this file.
+' If SB3 stops with an error instead, write down the LINE NUMBER and
+' the message - they tell me exactly what to change.
+'
+' The first three OPEN lines test file writing three ways:
+'   line 19 fails -> the folder this file was loaded from cannot be written
+'                    (e.g. it was opened from inside the zip - extract it first)
+'   line 22 fails -> the folder in that line is wrong - double-click
+'                    vd_install.bat in the VirtualDowel folder once
+'   line 27 fails -> SB3 needs a literal path in OPEN - the routine must change
+'=====================================================================
+OPEN "vd_selftest_result.txt" FOR OUTPUT AS #1
+WRITE #1; "SELFTEST,2"
+WRITE #1; "OPEN_RELATIVE,ok"
+OPEN "C:\SbParts\VirtualDowel\vd_selftest_literal.txt" FOR OUTPUT AS #2
+WRITE #2; "literal absolute path ok"
+CLOSE #2
+WRITE #1; "OPEN_LITERAL_ABSOLUTE,ok"
+&st_out = "C:\SbParts\VirtualDowel\vd_selftest_variable.txt"
+OPEN &st_out FOR OUTPUT AS #3
+WRITE #3; "variable absolute path ok"
+CLOSE #3
+WRITE #1; "OPEN_VARIABLE_ABSOLUTE,ok"
+&st_pyexe = "C:\SbParts\VirtualDowel\venv\Scripts\python.exe"
+&st_script = "C:\SbParts\VirtualDowel\vd_align.py"
+'
+'---- 1. system variables used by the probe routine and the aligned files
+&v = %(1)
+WRITE #1; "SV1,"; &v
+&v = %(2)
+WRITE #1; "SV2,"; &v
+&v = %(3)
+WRITE #1; "SV3,"; &v
+&v = %(6)
+WRITE #1; "SV6,"; &v
+&v = %(7)
+WRITE #1; "SV7,"; &v
+&v = %(22)
+WRITE #1; "SV22,"; &v
+&v = %(25)
+WRITE #1; "SV25,"; &v
+&v = %(51)
+WRITE #1; "SV51,"; &v
+&v = %(52)
+WRITE #1; "SV52,"; &v
+&v = %(61)
+WRITE #1; "SV61,"; &v
+&v = %(62)
+WRITE #1; "SV62,"; &v
+&v = %(66)
+WRITE #1; "SV66,"; &v
+&v = %(67)
+WRITE #1; "SV67,"; &v
+&v = %(71)
+WRITE #1; "SV71,"; &v
+&v = %(73)
+WRITE #1; "SV73,"; &v
+&v = %(146)
+WRITE #1; "SV146,"; &v
+&v = %(147)
+WRITE #1; "SV147,"; &v
+'
+'---- 2. strings and number formatting in WRITE
+&s = "abc" & " " & "Def"
+WRITE #1; "STR,"; &s
+&a = 1 / 3
+&b = -0.000123
+&c = 12345.678
+&d = 0.1 + 0.2
+WRITE #1; "NUM,"; &a; ","; &b; ","; &c; ","; &d
+'
+'---- 3. system variable addressed through a variable - as in %(&vd_idx)
+&i = 1 + 50
+&v = %(&i)
+WRITE #1; "IND,"; &v
+'
+'---- 4. IF ... THEN forms
+&t = 5
+&r = 0
+IF &t > 4 THEN &r = 1
+IF &t < 4 THEN &r = 2
+WRITE #1; "IF,"; &r
+&g = 0
+IF &t = 5 THEN GOSUB st_sub
+WRITE #1; "IFGOSUB,"; &g
+'
+'---- 5. nested GOSUB six deep - the probe routine needs five
+&n = 0
+GOSUB st_l1
+WRITE #1; "DEPTH,"; &n
+'
+'---- 6. arm and disarm an input handler with variables - nothing is triggered
+&pin = 1
+&trig = 0
+ON INP(&pin, &trig) GOSUB st_hit
+ON INP(&pin, &trig)
+WRITE #1; "ONINP,ok"
+'
+'---- 7. message boxes and their answers
+MSGBOX(Selftest - please click OK.,OKCancel,Virtual Dowel selftest)
+WRITE #1; "MB1,"; &msganswer
+MSGBOX(Selftest - please click No.,YesNoCancel,Virtual Dowel selftest)
+&r = 0
+IF &msganswer = "No" THEN &r = 1
+WRITE #1; "MB2,"; &msganswer; ","; &r
+MSGBOX(Is ShopBot in PREVIEW mode right now?,YesNo,Virtual Dowel selftest)
+WRITE #1; "PREVIEW_ANSWER,"; &msganswer
+MSGBOX(Selftest - information box. Click OK.,64,Virtual Dowel selftest)
+'
+'---- 8. INPUT with three values - as used by SIM mode
+INPUT "Selftest - type 1.5 then -2 then 0.6 with commas between them" &x, &y, &z
+&sum = &x + &y + &z
+WRITE #1; "INPUT,"; &x; ","; &y; ","; &z; ","; &sum
+'
+'---- 9. PRINT and a timed PAUSE - whole seconds only - a PAUSE under 1 s stopped the file on this SB3
+PRINT "Virtual Dowel selftest - sum is "; &sum
+PAUSE 1
+WRITE #1; "PAUSE,ok"
+'
+'---- 10. expressions used by the header of every aligned file
+&dx = %(1) - %(6)
+WRITE #1; "DX,"; &dx
+&k = 0
+IF %(22) = 1 THEN &k = 1
+WRITE #1; "MODE22_IS_1,"; &k
+&k = 0
+IF %(66) > 0.99999 THEN &k = 1
+WRITE #1; "PROP66_GT,"; &k
+'
+'---- 11. SHELL - starts the script exactly as vd_probe.sbp does. SB3 did not start vd_align.bat.
+'BEFORE running delete vd_launch.log and vd_state.json from the VirtualDowel folder if they exist.
+'Afterwards both should be there again - vd_state.json means Python ran.
+&cmd = &st_pyexe & " " & &st_script & " newsession"
+WRITE #1; "SHELL_A,"; &cmd
+SHELL, &cmd, 1, SYNC
+WRITE #1; "SHELL_A,returned"
+WRITE #1; "END,ok"
+CLOSE #1
+'
+'Found on your SB3 - so no longer tested here:
+'  a quoted text holding - + * / = in an assignment is worked out as arithmetic - Undefined variable
+'  joining texts with & put spaces around / and dropped ~
+'  SHELL starts .exe programs but did not start a .bat file
+'The routines keep such characters out of quoted texts - MSGBOX PRINT and INPUT prompts are fine.
+MSGBOX(Selftest finished. Please send vd_selftest_result.txt from the folder of vd_selftest.sbp - and vd_launch.log from the VirtualDowel folder.,64,Virtual Dowel selftest)
+END
+'
+'---- subroutines
+st_sub:
+&g = 1
+RETURN
+st_l1:
+&n = 1
+GOSUB st_l2
+RETURN
+st_l2:
+&n = 2
+GOSUB st_l3
+RETURN
+st_l3:
+&n = 3
+GOSUB st_l4
+RETURN
+st_l4:
+&n = 4
+GOSUB st_l5
+RETURN
+st_l5:
+&n = 5
+GOSUB st_l6
+RETURN
+st_l6:
+&n = 6
+RETURN
+st_hit:
+ON INP(&pin, &trig)
+RETURN
