@@ -27,6 +27,8 @@ Constraints:
 
 ## 3. Half-slot mode: the method
 
+**Side A is placed as in the hole mode:** zero X/Y at the corner of the Fusion Setup 1 WCS and run it; side A is never probed. Its zero does not affect the A/B registration, but it matters twice: the rough fit assumes each slot opening is at the stock-box edge, so zero within about 0.1 in along the flip axis (or cut the key notch); and the round end must end up at least 0.75 in inside the real edge, so make the slot longer by the expected zero error.
+
 **Side A** cuts two slots, like the two holes of the hole mode:
 
 - On the flip axis, at opposite ends (for an end-over-end flip: one in the left edge, one in the right edge). On the flip axis, the side-A and side-B coordinates are the same.
@@ -112,8 +114,8 @@ The bay must be open to the outside edge. A closed pocket, round or not, does no
 
 Nikolai makes the bays in Fusion, as a Setup 2 operation or as their own file, posted with his ShopBot post. So the cutter, feeds, Z and the post's conventions are his. Virtual Dowel only moves the file (section 5), with the existing rewriter and its rules, and checks it:
 
-- done: every cut is within `bay_reach` of a slot (a part file is refused);
-- planned: the cuts cover the bay size of section 5 around each slot (needs the bay cutter diameter, entered in the window, because the post does not write it).
+- kept: every cut is within `bay_reach` of a slot. This does not measure the bays; it only stops the rough fit (good to about 0.2 in) from being applied to a part file by mistake. It works on any OpenSBP file (Fusion, VCarve, Aspire or hand-written), with the same parser that rotates every job file.
+- dropped (Nikolai, 2026-10-04): reading the bay and slot sizes back out of the toolpaths. It would need the cutter diameter and guesses about the CAM, and it breaks on unusual toolpaths. Replaced by the **size calculator**: Nikolai enters the probe and stock numbers and the slot and bay sizes he plans; it gives the minimum sizes of section 5, the probing height band, and OK or not OK. One Python function, used by the window and by a CLI word; the guide shows the formulas and a worked example.
 
 Rules for the bay operation (in the README):
 
@@ -286,7 +288,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 | 1 (done) | Python: open-side centre calculation, correction for a turned slot, open-side and stock-box checks; rough fit and bay-file check (moved here from phase 3) | synthetic touches; side-A -> flip -> side-B registration test |
 | 2 (done) | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
 | 3 | Rough locate run in `vd_probe.sbp`; optional key notch (three-line fit); SHELL word for the rough fit | VM run of the rough locate; three-line fit from noisy jogs (as in `docs/rough_fit_sim.py`); lint |
-| 4 | Window: mode switch (holes, half slots, through slots), slot entry, probe sizes, computed bay and slot sizes, steps, drawing, Guide button, bay coverage check | window tests |
+| 4 | Window: mode switch (holes, half slots, through slots), slot entry, probe sizes, size calculator, steps, drawing, Guide button | window tests; calculator unit tests |
 | 5 | README operator section, `docs/guide.html`, machine tests | below |
 | 6 | Edge mode | section 10 |
 
