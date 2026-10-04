@@ -152,7 +152,7 @@ Use this when the board is too thick to drill the reference holes through: the m
 
 **The idea.** The two reference holes move out to the edges of the board and become U-shaped slots that open to the outside: half slots. Side A cuts them from face A to a little past mid-thickness, from outside the board. On side B, a short bay cut from face B opens a path down to each slot. Then the probe comes in from the side and probes each slot like a hole. Virtual Dowel never makes toolpaths: you make the slots, the bays and the side-B job in Fusion.
 
-**Sizes.** Get the minimum slot and bay sizes for your probe and stock first. In a command window in the VirtualDowel folder (all values in inches; add `--mm` for millimetres):
+**Sizes.** Get the minimum slot and bay sizes for your probe and stock first: click **Sizes...** in the window (a live drawing of side B and of one slot and bay; anything too small turns red), or in a command window in the VirtualDowel folder (all values in inches; add `--mm` for millimetres):
 
 ```
 py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75 --slot-length 1.25 --bay-width 2.3 --bay-reach 1.2

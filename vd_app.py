@@ -153,6 +153,7 @@ class App:
                 ttk.Radiobutton(lf, text=txt, value=val, variable=self.loc_var,
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
             ttk.Button(lf, text="Guide", command=self.on_guide).pack(side="right")
+            ttk.Button(lf, text="Sizes...", command=self.on_sizes).pack(side="right", padx=(0, 6))
 
         # side-B files
         jf = ttk.LabelFrame(outer, text="Side-B job files - one per tool", padding=6)
@@ -313,6 +314,204 @@ class App:
             self.error("Virtual Dowel", f"The guide is missing: {path}")
             return
         webbrowser.open("file:///" + path.replace(os.sep, "/").lstrip("/"))
+
+    # ------------------------------------------------------------------ size calculator (half slots)
+    SIZE_FIELDS = (("Probe", None), ("ball", "Ball diameter"), ("stem", "Stem diameter"),
+                   ("free", "Ball centre to body"), ("body", "Body diameter"), ("length", "Ball centre to collet nut"),
+                   ("Stock and slots", None), ("thick", "Stock thickness"), ("slot_depth", "Side-A slot depth"),
+                   ("widths", "Slot widths"), ("slot_length", "Edge to round-end centre"),
+                   ("Planned bay (optional)", None), ("bay_width", "Bay width"), ("bay_reach", "Bay reach past centre"))
+
+    def on_sizes(self) -> None:
+        """A live view of the half-slot size rules (vd_align.slot_bay_sizes): what the Fusion slots and bays
+        need for this probe and stock. Nothing is read from the job files."""
+        top = tk.Toplevel(self.root)
+        top.title("Virtual Dowel - slot and bay sizes")
+        top.transient(self.root)
+        self.sizes_top = top
+        saved = va.load_sizes_inputs()
+        widths = [t[2] for t in self._hole_texts() if t[2]]
+        start = dict(saved, ball=_num(str(self.mvars["tip"].get())) or 0.125,
+                     widths=", ".join(widths) if len(widths) >= 2 else "0.625, 0.75", bay_width="", bay_reach="")
+        self.size_vars: Dict[str, tk.StringVar] = {}
+        left = ttk.Frame(top, padding=10)
+        left.grid(row=0, column=0, sticky="ns")
+        r = 0
+        for key, label in self.SIZE_FIELDS:
+            if label is None:
+                ttk.Label(left, text=key, font=("Segoe UI", 10, "bold")).grid(row=r, column=0, columnspan=2,
+                                                                             sticky="w", pady=(8 if r else 0, 2))
+            else:
+                ttk.Label(left, text=label).grid(row=r, column=0, sticky="w")
+                v = tk.StringVar(value=_fmt(start[key]) if isinstance(start[key], float) else str(start[key]))
+                ttk.Entry(left, textvariable=v, width=12).grid(row=r, column=1, padx=(8, 0), pady=1)
+                v.trace_add("write", lambda *a: self._sizes_later())
+                self.size_vars[key] = v
+            r += 1
+        self.size_mm = tk.IntVar(value=0)
+        ttk.Checkbutton(left, text="All values in mm", variable=self.size_mm,
+                        command=self._sizes_later).grid(row=r, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        right = ttk.Frame(top, padding=(0, 10, 10, 10))
+        right.grid(row=0, column=1, sticky="nsew")
+        self.size_status = tk.Label(right, text="", anchor="w", font=("Segoe UI", 12, "bold"), fg="white", padx=8, pady=4)
+        self.size_status.pack(fill="x")
+        self.size_canvas = tk.Canvas(right, width=760, height=400, bg="white", highlightthickness=0)
+        self.size_canvas.pack(fill="both", expand=True, pady=(6, 0))
+        self.size_text = tk.Text(right, height=11, width=96, wrap="word", font=MONO)
+        self.size_text.pack(fill="x", pady=(6, 0))
+        bf = ttk.Frame(right)
+        bf.pack(fill="x", pady=(6, 0))
+        ttk.Button(bf, text="Close", command=self._sizes_close).pack(side="right")
+        top.protocol("WM_DELETE_WINDOW", self._sizes_close)
+        self._sizes_job = None
+        self.update_sizes()
+
+    def _sizes_later(self) -> None:
+        if getattr(self, "_sizes_job", None):
+            self.root.after_cancel(self._sizes_job)
+        self._sizes_job = self.root.after(150, self.update_sizes)
+
+    def _sizes_close(self) -> None:
+        vals = {k: _num(v.get()) for k, v in self.size_vars.items() if k in va.SIZES_DEFAULTS}
+        if all(x is not None and x > 0 for x in vals.values()) and not self.size_mm.get():
+            va.save_sizes_inputs(vals)                       # remembered in inches for next time
+        self.sizes_top.destroy()
+
+    def read_sizes(self):
+        """(values, errors) from the calculator fields."""
+        vals, errs = {}, []
+        for key, label in self.SIZE_FIELDS:
+            if label is None:
+                continue
+            txt = self.size_vars[key].get().strip()
+            if key == "widths":
+                try:
+                    w = [float(x) for x in txt.replace(";", ",").split(",") if x.strip()]
+                except ValueError:
+                    w = []
+                if len(w) < 2 or any(x <= 0 for x in w):
+                    errs.append("slot widths: two or more numbers with commas between them")
+                vals[key] = w
+            elif key in ("bay_width", "bay_reach") and not txt:
+                vals[key] = None
+            else:
+                x = _num(txt)
+                if x is None or x <= 0:
+                    errs.append(f"{label.lower()}: enter a number larger than 0")
+                vals[key] = x
+        return vals, errs
+
+    def update_sizes(self) -> None:
+        self._sizes_job = None
+        vals, errs = self.read_sizes()
+        c = self.size_canvas
+        c.delete("all")
+        if errs:
+            self.size_status.configure(text="Enter the numbers", bg=AMBER)
+            self._set_size_text("\n".join(errs))
+            return
+        res = va.slot_bay_sizes(mm=bool(self.size_mm.get()), **vals)
+        self.size_result = res
+        self.size_status.configure(text="OK - these sizes work with this probe" if res.ok else
+                                   "NOT OK - see the red parts and the problems below", bg=GREEN if res.ok else RED)
+        self._set_size_text(res.text())
+        self.draw_sizes(c, vals, res)
+
+    def _set_size_text(self, s: str) -> None:
+        self.size_text.configure(state="normal")
+        self.size_text.delete("1.0", "end")
+        self.size_text.insert("1.0", s)
+        self.size_text.configure(state="disabled")
+
+    def draw_sizes(self, c: tk.Canvas, v: dict, r) -> None:
+        """Left: side B cut on the slot axis. Right: top view of one slot and its bay. Real proportions."""
+        k = 25.4 if r.unit == "mm" else 1.0
+        ink, wood, slot_c, bay_c, probe_c, bad = "#1b2533", "#ead9b2", "#bfa8ee", "#e6dcf8", "#0e7490", RED
+        ball, stem, free, body, length = v["ball"], v["stem"], v["free"], v["body"], v["length"]
+        thick, depth, L = v["thick"], v["slot_depth"], v["slot_length"]
+        w = max(v["widths"])
+        rho = (w - ball) / 2
+        clear = body if r.body_in_bay else stem
+        reach = v["bay_reach"] if v["bay_reach"] else r.min_bay_reach
+        bay_w = v["bay_width"] if v["bay_width"] else r.min_bay_width
+        reach_bad = v["bay_reach"] is not None and v["bay_reach"] < r.min_bay_reach - 1e-9
+        width_bad = v["bay_width"] is not None and v["bay_width"] < r.min_bay_width - 1e-9
+        park_ok = r.park_lo <= r.park_hi
+        h = (r.park_lo + r.park_hi) / 2 if park_ok else max(r.park_hi, ball)
+        park_x = -0.3 * k
+
+        # ---- section on the slot axis (x along the slot from the edge, z up from the spoilboard)
+        x0w, x1w = park_x - clear - 0.4 * k, L + reach + 0.6 * k
+        z0w, z1w = -0.65 * k, max(thick, h + length + 0.2 * k) + 0.2 * k
+        W, H, ox, oy = 430, 360, 10, 30
+        lab = ("Segoe UI", 9)
+        s = min(W / (x1w - x0w), H / (z1w - z0w))
+        X = lambda x: ox + (x - x0w) * s          # noqa: E731
+        Y = lambda z: oy + (z1w - z) * s          # noqa: E731
+        c.create_rectangle(X(x0w), Y(0), X(x1w), Y(-0.25 * k), fill="#d5dbe2", outline="#8c97a4")
+        c.create_rectangle(X(0), Y(thick), X(x1w), Y(0), fill=wood, outline=ink)
+        c.create_rectangle(X(0), Y(thick), X(L + reach), Y(r.bay_floor), fill=bay_c,
+                           outline=bad if reach_bad else "#6d3fc0", width=2 if reach_bad else 1)
+        if reach_bad:
+            c.create_line(X(L + r.min_bay_reach), Y(thick), X(L + r.min_bay_reach), Y(r.bay_floor),
+                          fill=bad, dash=(4, 3))
+        c.create_rectangle(X(0), Y(depth), X(L + w / 2), Y(0), fill=slot_c, outline="#6d3fc0")
+        c.create_line(X(L), Y(-0.3 * k), X(L), Y(thick + 0.1 * k), fill="#4e5a69", dash=(8, 3, 2, 3))
+        if park_ok:
+            c.create_rectangle(X(park_x - 0.12 * k), Y(r.park_hi), X(park_x + 0.12 * k), Y(r.park_lo),
+                               outline=probe_c, dash=(3, 2))
+        body_bad = not park_ok
+        for x, dash in ((park_x, None), (L + rho, (5, 3))):
+            col = bad if body_bad else probe_c
+            c.create_oval(X(x - ball / 2), Y(h + ball / 2), X(x + ball / 2), Y(h - ball / 2), outline=col, dash=dash,
+                          fill="" if dash else col)
+            c.create_rectangle(X(x - stem / 2), Y(h + free), X(x + stem / 2), Y(h + ball / 2), outline=col, dash=dash)
+            c.create_rectangle(X(x - body / 2), Y(h + length), X(x + body / 2), Y(h + free), outline=col, dash=dash)
+            c.create_rectangle(X(x - body * 0.8), Y(h + length + 0.15 * k), X(x + body * 0.8), Y(h + length),
+                               outline=col, dash=dash)
+        f = lambda val: f"{val:.3f}"              # noqa: E731
+        c.create_text(X(L + reach) + 4, Y(r.bay_floor), text=f"bay floor {f(r.bay_floor)}", anchor="nw", fill=ink,
+                      font=lab)
+        c.create_text(X(x1w) - 4, Y(thick) - 2, text=f"bay depth {f(r.bay_depth)}", anchor="se", fill=ink, font=lab)
+        c.create_text(X(x0w) + 2, Y(-0.3 * k), text=(f"park the ball {f(r.park_lo)} to {f(r.park_hi)} above the "
+                                                       "spoilboard" if park_ok else "no park height works"),
+                      anchor="nw", fill=probe_c if park_ok else bad, font=lab)
+        c.create_text(ox, 6, text="Side B, cut on the slot axis", anchor="nw", fill=ink, font=("Segoe UI", 10, "bold"))
+
+        # ---- top view (x along the slot, y across it)
+        ox2, W2 = 460, 290
+        half = bay_w / 2
+        x0t, x1t = -0.5 * k, L + reach + 0.4 * k
+        y0t, y1t = -(max(half, r.min_bay_width / 2) + 0.3 * k), max(half, r.min_bay_width / 2) + 0.3 * k
+        H2 = H - 40
+        s2 = min(W2 / (x1t - x0t), H2 / (y1t - y0t))
+        X2 = lambda x: ox2 + (x - x0t) * s2       # noqa: E731
+        Y2 = lambda y: oy + (y1t - y) * s2        # noqa: E731
+        c.create_rectangle(X2(0), Y2(y1t), X2(x1t), Y2(y0t), fill=wood, outline="")
+        c.create_line(X2(0), Y2(y1t), X2(0), Y2(y0t), fill=ink)
+        c.create_rectangle(X2(0), Y2(half), X2(L + reach), Y2(-half), fill=bay_c,
+                           outline=bad if (width_bad or reach_bad) else "#6d3fc0", width=2 if (width_bad or reach_bad) else 1)
+        if width_bad or reach_bad:
+            mh = r.min_bay_width / 2
+            c.create_rectangle(X2(0), Y2(mh), X2(L + r.min_bay_reach), Y2(-mh), outline=bad, dash=(4, 3))
+        c.create_rectangle(X2(0), Y2(w / 2), X2(L), Y2(-w / 2), fill=slot_c, outline="")
+        c.create_oval(X2(L - w / 2), Y2(w / 2), X2(L + w / 2), Y2(-w / 2), fill=slot_c, outline="")
+        back = rho + 0.08 * k
+        env = clear / 2 + 0.4 * k                 # the probe body plus the room the rough fit needs
+        for (bx, by) in ((L + rho, 0.0), (L - back, rho), (L - back, -rho)):
+            outside = (abs(by) + env > half + 1e-6) or (bx + env > L + reach + 1e-6)
+            c.create_oval(X2(bx - env), Y2(by + env), X2(bx + env), Y2(by - env),
+                          outline=bad if outside else "#9fb8c2", dash=(1, 3))
+            c.create_oval(X2(bx - clear / 2), Y2(by + clear / 2), X2(bx + clear / 2), Y2(by - clear / 2),
+                          outline=probe_c, dash=(4, 3))
+            c.create_oval(X2(bx - ball / 2), Y2(by + ball / 2), X2(bx + ball / 2), Y2(by - ball / 2),
+                          fill=probe_c, outline="")
+        c.create_text(ox2, 6, text="Top view: slot, bay, probe " + ("body" if r.body_in_bay else "stem"),
+                      anchor="nw", fill=ink, font=("Segoe UI", 10, "bold"))
+        c.create_text(ox2, oy + H2 + 6, text=f"bay at least {f(r.min_bay_width)} wide and {f(r.min_bay_reach)}\n"
+                                              "past the round-end centre\ndotted: probe " +
+                                              ("body" if r.body_in_bay else "stem") + " + 0.4 for the rough fit",
+                      anchor="nw", fill=ink, font=lab)
 
     def read_key(self) -> Tuple[Optional[Tuple[float, float]], List[str]]:
         vals = [_num(v.get()) for v in self.key_vars]

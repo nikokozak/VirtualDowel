@@ -288,7 +288,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 | 1 (done) | Python: open-side centre calculation, correction for a turned slot, open-side and stock-box checks; rough fit and bay-file check (moved here from phase 3) | synthetic touches; side-A -> flip -> side-B registration test |
 | 2 (done) | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
 | 3 (done) | Rough locate run in `vd_probe.sbp` (`&vd_rough`); `prepare_rough`; optional key notch (`fit_lines`); SHELL word `rough` (until the window step exists, it writes the report and the log) | VM run of the rough locate; three-line fit from noisy jogs (as in `docs/rough_fit_sim.py`); lint |
-| 4 (minimum done 2026-10-04, for the first machine test) | Window: *Locate with* (holes, half slots, through slots), bay file and key notch, *Start rough locate*, rough-result window, *Guide* button. Still to do: probe sizes and a visual size calculator (a drawing that updates with the numbers) in the window | window tests |
+| 4 (minimum done 2026-10-04, for the first machine test) | Window: *Locate with* (holes, half slots, through slots), bay file and key notch, *Start rough locate*, rough-result window, *Guide* button. Visual size calculator added (*Sizes...*: live section and top-view drawings, too-small parts in red). | window tests |
 | 5 (done) | README section 3b with machine tests H0-H3 and the dry-run kit in `docs/example`; `docs/guide.html` | Nikolai's tests |
 | 6 | Edge mode | section 10 |
 

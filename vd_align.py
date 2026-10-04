@@ -2010,6 +2010,28 @@ def read_machine_file(machine_file: str = None) -> dict:
         return {}
 
 
+SIZES_DEFAULTS = dict(stem=0.08, free=1.0, body=0.8, length=3.0, thick=3.0, slot_depth=1.75, slot_length=1.25)
+
+
+def load_sizes_inputs(machine_file: str = None) -> Dict[str, float]:
+    """Size calculator inputs remembered in vd_machine.json (probe sizes and the last stock), in inches."""
+    vals = dict(SIZES_DEFAULTS)
+    saved = read_machine_file(machine_file).get("sizes")
+    if isinstance(saved, dict):
+        for k, v in saved.items():
+            if k in vals and isinstance(v, (int, float)) and math.isfinite(v) and v > 0:
+                vals[k] = float(v)
+    return vals
+
+
+def save_sizes_inputs(vals: Dict[str, float], machine_file: str = None) -> None:
+    path = machine_file or MACHINE_FILE
+    d = read_machine_file(path)
+    d["sizes"] = {k: float(vals[k]) for k in SIZES_DEFAULTS if k in vals}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=1)
+
+
 def save_machine(m: Dict[str, float], calibration: Optional[dict] = None, machine_file: str = None) -> None:
     path = machine_file or MACHINE_FILE
     d = read_machine_file(path)

@@ -2408,6 +2408,11 @@ except Exception:                         # no tkinter or no display: window tes
     HAVE_TK = False
 
 
+def vd_app_red():
+    import vd_app
+    return vd_app.RED
+
+
 @unittest.skipUnless(HAVE_TK, "tkinter with a display is needed for the window tests")
 class TestWindow(_Folder):
     def app(self, mode, **kw):
@@ -2509,6 +2514,37 @@ class TestWindow(_Folder):
         vals = va._sbp_value_lines(self.run_file())
         self.assertEqual((vals["rough"], vals["open1"], vals["open2"]), ("0", "3", "4"))
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "bays_VDROUGH.sbp")))   # the new session removed it
+
+    def test_size_calculator_window(self):
+        a = self.app("prepare")
+        a._set_holes([(1.5, 15.0, 0.625), (22.5, 15.0, 0.75)])
+        a.on_sizes()
+        self.assertEqual(a.size_vars["widths"].get(), "0.625, 0.75")      # taken from the slot table
+        for k, val in dict(ball="0.125", stem="0.08", free="1", body="0.8", length="3", thick="3",
+                           slot_depth="1.75", slot_length="1.25").items():
+            a.size_vars[k].set(val)
+        a.update_sizes()
+        self.assertTrue(a.size_result.ok, a.size_result.problems)
+        self.assertIn("OK", a.size_status.cget("text"))
+        self.assertGreater(len(a.size_canvas.find_all()), 20)
+        reds = lambda: [i for i in a.size_canvas.find_all()                # noqa: E731
+                        if a.size_canvas.type(i) in ("rectangle", "oval", "line")
+                        and "outline" in a.size_canvas.itemconfig(i)
+                        and a.size_canvas.itemcget(i, "outline") == vd_app_red()]
+        self.assertEqual(reds(), [])
+        a.size_vars["bay_width"].set("1.5")                                # too narrow for the probe body
+        a.update_sizes()
+        self.assertFalse(a.size_result.ok)
+        self.assertIn("NOT OK", a.size_status.cget("text"))
+        self.assertTrue(reds())
+        a.size_vars["widths"].set("0.6")
+        a.update_sizes()
+        self.assertIn("Enter the numbers", a.size_status.cget("text"))
+        a.size_vars["widths"].set("0.625, 0.75")
+        a.size_vars["free"].set("1.2")
+        a._sizes_close()
+        self.assertEqual(va.load_sizes_inputs()["free"], 1.2)              # remembered for next time
+        a.root.destroy()
 
     def test_rough_result_without_a_rough_session(self):
         r = self.app("rough")

@@ -36,7 +36,7 @@ python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --ho
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (157 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (158 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -79,7 +79,7 @@ Data flow:
 
 Key functions in `vd_align.py`: `parse_probe_data`, `compute_holes`, `fit_rigid`, `align`, `hole_checks`, `mirror_alternatives`, `SbpTransformer`, `build_output`, `run_alignment`, `render_run`, `prepare_probing`, `install_paths`.
 
-Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1), the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`), the size calculator (`slot_bay_sizes`, CLI word `sizes`) and the rough locate (phase 3: `&vd_rough`, `prepare_rough`, word `rough`, key notch via `fit_lines`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); the window has the minimum for a machine test (Locate with, bay file, Start rough locate, rough-result window, Guide); README section 3b has the machine tests H0-H3 and `docs/example` the dry-run kit. Not run on the machine.
+Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1), the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`), the size calculator (`slot_bay_sizes`, CLI word `sizes`) and the rough locate (phase 3: `&vd_rough`, `prepare_rough`, word `rough`, key notch via `fit_lines`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); the window has the minimum for a machine test (Locate with, bay file, Start rough locate, rough-result window, Guide) and a visual size calculator (*Sizes...*: live section and top-view drawings; inputs remembered in `vd_machine.json` under `sizes`); README section 3b has the machine tests H0-H3 and `docs/example` the dry-run kit. Not run on the machine.
 
 Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_rough_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_VDROUGH.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
 
