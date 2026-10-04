@@ -153,7 +153,7 @@ New in v2.0, not yet run on the machine: the C80 custom cut and `C:\SbParts\Cust
 
 Known mechanical limit: the old ShopBot MAX lost X/Y steps once on a fast finishing pass. No software check finds a slip during a cut.
 
-In progress: a second locating mode that finds the stock from its four edges, for stock too thick to drill through with the available Z travel. Plan: `docs/edge-locating-plan.md`.
+In progress: a locating mode for stock too thick to drill through with the available Z travel (edges or edge slots). Plan: `docs/thick-stock-plan.md`.
 
 ## 11. Working with Nikolai
 
