@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.0  (2026-10-02)
+Virtual Dowel - vd_align.py  v2.0.1  (2026-10-04)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.0"
+VERSION = "2.0.1"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2097,6 +2097,9 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     # the first message names this preparation, so an old vd_run.sbp is recognisable
     text = text.replace("MSGBOX(VIRTUAL DOWEL probing. ",
                         f"MSGBOX(VIRTUAL DOWEL probing - prepared {stamp} for {len(design)} holes. ", 1)
+    # SB3 files are Latin-1. Encode before anything is deleted, so a file name in the note line
+    # (e.g. with an en dash) cannot stop Start half way.
+    data = text.encode("latin-1", errors="replace")
     for j in jobs:
         write_sidecar(j, design, stock)
     save_machine(machine)
@@ -2109,8 +2112,8 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     save_session({"kind": "probe", "jobs": list(jobs), "holes": [list(d) for d in design],
                   "stock": list(stock) if stock else None, "sim": bool(sim), "prepared": time.time()})
     path = run_path or RUN_FILE
-    with open(path, "w", encoding="latin-1", newline="") as fh:
-        fh.write(text)
+    with open(path, "wb") as fh:
+        fh.write(data)
     return Prepared(True, [], checks, path)
 
 

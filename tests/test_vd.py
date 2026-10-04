@@ -1459,6 +1459,17 @@ class TestPrepare(_Folder):
         self.assertEqual(va.read_machine_file()["probe"]["passes"], 3)              # remembered for next time
         self.assertEqual(va._sbp_value_lines(open(va.TEMPLATE_FILE).read())["passes"], "3")   # and in vd_probe.sbp
 
+    def test_job_names_outside_latin1_do_not_break_start(self):
+        # SB3 files are Latin-1. A file name with an en dash used to crash Start after the old
+        # outputs and probe data were already deleted.
+        job = os.path.join(self.tmp, "side B – final.sbp")
+        shutil.copy(JOB, job)
+        p = self.prep(jobs=[job])
+        self.assertTrue(p.ok, p.errors)
+        text = open(va.RUN_FILE, "rb").read().decode("latin-1")
+        self.assertIn("side B ? final.sbp", text)                                  # only in the comment line
+        self.assertEqual(sbp_lint_problems(text), [])
+
     def test_problems_are_found_before_probing(self):
         # a symmetric layout cannot tell a wrong flip apart
         p = self.prep(design=[(12.0, 1.0, 0.5), (12.0, 29.0, 0.5)])
