@@ -255,7 +255,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 
 1. **A half-slot is a hole with an open side.** New per-hole field "open side" (none, +X, -X, +Y, -Y) in the window, the sidecar and the CLI; the window sets it from the nearest stock-box edge. The routine gets one direction variable per hole and skips the touch toward the open side. `T` records keep their format; a new record names the open side, so old data files still parse.
 2. **Rough locate** is a short run mode of `vd_probe.sbp`: keypad at each opening, record `%(1)`/`%(2)` and `%(6)`/`%(7)`, write the data, start the window.
-3. **Rough fit:** the existing two-point rigid fit for the normal case; the three-line fit for the key notch comes later, only if needed. The bay-file check is new; moving the bay file uses the existing rewriter and runtime header.
+3. **Rough fit:** the existing two-point rigid fit for the normal case; the three-line fit when a key notch is cut (an option in the window, built in phase 3). The bay-file check is new; moving the bay file uses the existing rewriter and runtime header.
 4. **Window steps.** The session records the step (rough locate, bay cut, probe, align). C80 opens the window at the current step, and each Start writes `vd_run.sbp` for that step, as now.
 5. **Simulator.** `tests/sbp_vm.py` gets stock with half-depth slots and bays, and a collision check for the stylus and the probe body, not only the ball. That check would have caught the revision-2 slot error.
 
@@ -266,7 +266,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 | 0 | v2.0 review fixes (section 13). Items 1-4 done in v2.0.1; the others wait for a decision. | a test per fix |
 | 1 | Python: half-slot design entry, open-side centre calculation, width correction for a turned slot | synthetic touches; side-A -> flip -> side-B registration test |
 | 2 | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
-| 3 | Rough locate run, rough fit, bay-file check, `_VDROUGH` output | rough fit from noisy jogs (as in `docs/rough_fit_sim.py`); part file refused as a bay file; independent toolpath check of the moved bay file |
+| 3 | Rough locate run, rough fit (two openings; optional key notch), bay-file check, `_VDROUGH` output | rough fit from noisy jogs (as in `docs/rough_fit_sim.py`); part file refused as a bay file; independent toolpath check of the moved bay file |
 | 4 | Window: mode switch (holes, half slots, through slots), slot entry, cutter settings, steps, bay drawing | window tests |
 | 5 | README operator section and machine tests | below |
 | 6 | Edge mode | section 10 |
