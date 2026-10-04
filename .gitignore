@@ -18,3 +18,5 @@ vd_selftest_chars.txt
 *_VDSIM.sbp
 *_report.txt
 *.vdholes.txt
+*_VDROUGH.sbp
+*_VDROUGHSIM.sbp

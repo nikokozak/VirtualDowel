@@ -72,11 +72,14 @@ DEFAULTS: Dict[str, float] = {
     "allow_offaxis_ambiguity": 0,   # 1 = only WARN when side-A and side-B hole coordinates could be confused
     "mirror_shift_warn_only": 0.100,  # a side-A/side-B mix-up that would shift the job less than this only WARNs
     "check_file_offset": 1,         # 1 = aligned file refuses to run with an FP offset/scale set
+    "slot_wall_margin": 0.02,       # half slots: the wall touches must be this far behind the round end
+    "rough_spacing_fail": 0.5,      # rough fit: jogged slot openings vs design openings
+    "bay_reach": 3.0,               # rough fit: every cut of the bay file must be this close to a slot
 }
 DIST_KEYS = {"spacing_warn", "spacing_fail", "residual_warn", "residual_fail", "diameter_abs_tol",
              "diameter_rel_tol", "roundness_warn", "roundness_fail", "repeat_warn", "repeat_fail",
              "eccentricity_warn", "ecc_consistency_warn", "offset_consistency", "zero_check_tol",
-             "symmetry_tol", "mirror_shift_warn_only"}
+             "symmetry_tol", "mirror_shift_warn_only", "slot_wall_margin", "rough_spacing_fail", "bay_reach"}
 
 DesignHole = Tuple[float, float, Optional[float]]     # x, y, diameter (None = not given)
 
@@ -152,6 +155,7 @@ class ProbeData:
     path: str = ""
     cal_ref: Optional[float] = None            # calibration run: measured diameter of the reference hole
     detected: Optional[Tuple[int, int]] = None  # input found automatically: (pin, deflected state)
+    open: Dict[int, Tuple[int, int]] = field(default_factory=dict)   # half slots: hole -> (axis, sign) it opens to
 
     @property
     def unit_name(self) -> str:
@@ -192,6 +196,7 @@ def parse_probe_data(text: str, path: str = "") -> ProbeData:
     end_count = None
     cal_ref: Optional[float] = None
     detected: Optional[Tuple[int, int]] = None
+    opened: Dict[int, Tuple[int, int]] = {}
     for n, raw in enumerate(split_lines(text), 1):
         s = raw.replace('"', "").strip()
         if not s:
@@ -224,6 +229,16 @@ def parse_probe_data(text: str, path: str = "") -> ProbeData:
             if t.axis not in (1, 2) or t.sign not in (1, -1):
                 raise ProbeDataError(f"probe data line {n}: bad axis/direction")
             touches.append(t)
+        elif tag == "O":
+            # half slot: the hole opens toward (axis, sign); the routine makes no touch in that direction
+            if header is None or len(f) != 3:
+                raise ProbeDataError(f"probe data line {n}: bad open side record")
+            h, ax, sg = _i(f[0], n), _i(f[1], n), _i(f[2], n)
+            if ax not in (1, 2) or sg not in (1, -1):
+                raise ProbeDataError(f"probe data line {n}: bad open side")
+            if not 1 <= h <= header["nholes"]:
+                raise ProbeDataError(f"probe data line {n}: open side for hole {h} out of range")
+            opened[h] = (ax, sg)
         elif tag == "H":
             pass  # routine's own running estimate - informational only
         elif tag == "CAL":
@@ -255,7 +270,7 @@ def parse_probe_data(text: str, path: str = "") -> ProbeData:
                      nominal=header["nominal"], nholes=header["nholes"], passes=header["passes"],
                      spin180=bool(header["spin"]), pin=header["pin"], trig=header["trig"],
                      mode=header["mode"], date=date, cfg=cfg, touches=touches, path=path,
-                     cal_ref=cal_ref, detected=detected)
+                     cal_ref=cal_ref, detected=detected, open=opened)
 
 
 # --------------------------------------------------------------------------------------
@@ -272,14 +287,39 @@ class HoleResult:
     n_passes: int
     ecc: Optional[Tuple[float, float]] = None   # probe tip offset from spindle axis (spin180)
     z: float = 0.0
+    open: Optional[Tuple[int, int]] = None      # half slot: (axis, sign) it opens to; centre = round end
+    wall_margin: Optional[float] = None         # half slot: how far behind the round end the wall touches were
 
     @property
     def dia(self) -> float:
         return (self.dia_x + self.dia_y) / 2.0
 
 
-def compute_holes(pd: ProbeData) -> Tuple[List[HoleResult], Tuple[float, float], Tuple[float, float]]:
-    """Returns hole results, the X/Y zero's table-base position %(6)/%(7) and its spread."""
+def _slot_pass(wp: Touch, wm: Touch, end: Touch, inward: Tuple[float, float],
+               theta: float) -> Tuple[Tuple[float, float], float, float]:
+    """One pass on a half slot: two wall touches in opposite directions across the slot, then the end
+    touch along the slot from their midpoint. The touches run along the machine axes and the slot is
+    turned by theta. Returns the centre of the round end, the ball-centre half-width rho and how far
+    behind that centre the wall touches were. A push past contact that is the same on both axes (ball
+    size, pretravel, latency) widens the wall pair exactly as much as it moves the end touch, so it
+    cancels; only a difference between the axes remains, with opposite signs at opposite slots."""
+    mx, my = (wp.x + wm.x) / 2.0, (wp.y + wm.y) / 2.0
+    rho = math.hypot(wp.x - wm.x, wp.y - wm.y) / 2.0 * math.cos(theta)
+    c, s = math.cos(theta), math.sin(theta)
+    ux, uy = c * inward[0] - s * inward[1], s * inward[0] + c * inward[1]
+    wx, wy = end.x - mx, end.y - my
+    uw = ux * wx + uy * wy
+    disc = uw * uw - (wx * wx + wy * wy) + rho * rho
+    if disc < 0:
+        raise ProbeDataError(f"probe data line {end.line}: the slot end touch does not fit the slot width")
+    t = uw - math.sqrt(disc)                 # centre = midpoint + t * slot axis, rho from the end touch
+    return (mx + t * ux, my + t * uy), rho, t
+
+
+def compute_holes(pd: ProbeData, theta: float = 0.0) -> Tuple[List[HoleResult], Tuple[float, float], Tuple[float, float]]:
+    """Returns hole results, the X/Y zero's table-base position %(6)/%(7) and its spread.
+    theta: board rotation from a first fit; only half slots use it (their touches run along the machine
+    axes, so a turned slot reads a little wide)."""
     orients = [0, 1] if pd.spin180 else [0]
     by_key: Dict[Tuple[int, int, int, int, int], Touch] = {}
     for t in pd.touches:
@@ -289,6 +329,8 @@ def compute_holes(pd: ProbeData) -> Tuple[List[HoleResult], Tuple[float, float],
             raise ProbeDataError(f"probe data line {t.line}: unexpected spindle orientation {t.orient}")
         if t.pas < 0 or t.pas > pd.passes:
             raise ProbeDataError(f"probe data line {t.line}: pass number {t.pas} out of range")
+        if pd.open.get(t.hole) == (t.axis, t.sign):
+            raise ProbeDataError(f"probe data line {t.line}: a touch toward the open side of slot {t.hole}")
         key = (t.hole, t.orient, t.pas, t.axis, t.sign)
         if key in by_key:
             raise ProbeDataError(f"probe data line {t.line}: duplicate touch record")
@@ -318,9 +360,29 @@ def compute_holes(pd: ProbeData) -> Tuple[List[HoleResult], Tuple[float, float],
         dys: List[float] = []
         zs: List[float] = []
         repeat = 0.0
+        margins: List[float] = []
+        op = pd.open.get(h)
         for o in orients:
             cxs, cys = [], []
             for k in range(1, pd.passes + 1):
+                if op is not None:
+                    ac = 3 - op[0]
+                    try:
+                        wp, wm = by_key[(h, o, k, ac, 1)], by_key[(h, o, k, ac, -1)]
+                        end = by_key[(h, o, k, op[0], -op[1])]
+                    except KeyError:
+                        raise ProbeDataError(f"probe data: slot {h} orientation {o} pass {k} is missing touches")
+                    if not (wx(wp) > wx(wm) if ac == 1 else wy(wp) > wy(wm)):
+                        raise ProbeDataError(f"probe data: slot {h} pass {k} touches are in the wrong order")
+                    inward = (-op[1], 0.0) if op[0] == 1 else (0.0, -op[1])
+                    (cx, cy), rho, margin = _slot_pass(wp, wm, end, inward, theta)
+                    cxs.append(cx)
+                    cys.append(cy)
+                    dxs.append(2 * rho + pd.tip)          # slot width; no second diameter to compare
+                    dys.append(2 * rho + pd.tip)
+                    margins.append(margin)
+                    zs.extend([wp.z, wm.z, end.z])
+                    continue
                 try:
                     xp = by_key[(h, o, k, 1, 1)]
                     xm = by_key[(h, o, k, 1, -1)]
@@ -349,7 +411,7 @@ def compute_holes(pd: ProbeData) -> Tuple[List[HoleResult], Tuple[float, float],
             ecc = None
         holes.append(HoleResult(index=h, center=center, per_orient=per_orient, dia_x=_mean(dxs),
                                 dia_y=_mean(dys), repeat=repeat, n_passes=pd.passes, ecc=ecc,
-                                z=_mean(zs)))
+                                z=_mean(zs), open=op, wall_margin=min(margins) if margins else None))
     return holes, offset, spread
 
 
@@ -545,6 +607,9 @@ def hole_checks(pd: ProbeData, holes: Sequence[HoleResult], spread: Tuple[float,
     fails: List[str] = []
     warns: List[str] = []
     for h in holes:
+        if h.wall_margin is not None and h.wall_margin < th["slot_wall_margin"] * s:
+            fails.append(f"slot {h.index}: the wall touches were {h.wall_margin:.3f} from the centre of the round "
+                         "end - they must be on the straight part of the slot. Make the slot longer")
         rnd = abs(h.dia_x - h.dia_y)
         if rnd > th["roundness_fail"] * s:
             fails.append(f"hole {h.index}: X and Y diameters differ by {rnd:.4f} - chips/fuzz in the hole, "
@@ -623,6 +688,23 @@ def box_coverage(tp: Tuple[float, float, float, float], box: Tuple[float, float,
     ix = max(0.0, min(tx1, box[2]) - max(tx0, box[0]))
     iy = max(0.0, min(ty1, box[3]) - max(ty0, box[1]))
     return (ix * iy) / ((tx1 - tx0) * (ty1 - ty0))
+
+
+SIDE_NAMES = {(1, -1): "-X", (1, 1): "+X", (2, -1): "-Y", (2, 1): "+Y"}
+
+
+def open_side(x: float, y: float, box: Tuple[float, float, float, float]) -> Tuple[int, int]:
+    """A half slot opens toward its nearest stock edge: (axis, sign)."""
+    x0, y0, x1, y1 = box
+    return min((x - x0, (1, -1)), (x1 - x, (1, 1)), (y - y0, (2, -1)), (y1 - y, (2, 1)))[1]
+
+
+def slot_opening(d: DesignHole, box: Tuple[float, float, float, float]) -> Tuple[float, float]:
+    """Where a half slot's axis meets the stock edge - the opening the operator jogs to for the rough fit."""
+    ax, sg = open_side(d[0], d[1], box)
+    if ax == 1:
+        return (box[2] if sg > 0 else box[0], d[1])
+    return (d[0], box[3] if sg > 0 else box[1])
 
 
 def _same_layout(a: Sequence[DesignHole], b: Sequence[DesignHole], tol: float, dtol: float) -> bool:
@@ -774,6 +856,7 @@ class TransformStats:
     ymax: float = -math.inf
     file_units: Optional[int] = None
     warnings: List[str] = field(default_factory=list)
+    cut_points: List[Tuple[float, float]] = field(default_factory=list)   # design XY of every feed move (M/CG)
     design_box: List[float] = field(default_factory=lambda: [math.inf, math.inf, -math.inf, -math.inf])
 
     def extent(self, p: Tuple[float, float]) -> None:
@@ -1040,6 +1123,8 @@ class SbpTransformer:
         xs = p[0] if len(p) > 0 else ""
         ys = p[1] if len(p) > 1 else ""
         r = self._apply(self._opt(xs, "X"), self._opt(ys, "Y"))
+        if cmd[0] == "M" and self.pos is not None:
+            self.stats.cut_points.append(self.pos)          # also a Z-only feed move (plunge) at a known point
         if r is None:
             return None
         self.stats.moves += 1
@@ -1052,6 +1137,8 @@ class SbpTransformer:
         v = self._num(p[0], "X" if axis == 0 else "Y")
         r = self._apply(v, None) if axis == 0 else self._apply(None, v)
         assert r is not None
+        if new_cmd == "M2":
+            self.stats.cut_points.append(self.pos)
         self.stats.moves += 1
         return f"{new_cmd},{r[0]},{r[1]}"
 
@@ -1090,6 +1177,8 @@ class SbpTransformer:
         if r is not None:
             p[1], p[2] = r
         self.stats.arcs += 1
+        if self.pos is not None:
+            self.stats.cut_points.append(self.pos)
         while len(p) > 5 and p[-1] == "":
             p.pop()
         return self._join(orig_cmd, p)
@@ -1110,7 +1199,7 @@ def detect_units_comment(lines: Sequence[str]) -> Optional[int]:
 # --------------------------------------------------------------------------------------
 def build_output(body: List[str], pd: ProbeData, fit: Fit, job_path: str,
                  offset: Optional[Tuple[float, float]], th: Dict[str, float], summary: str,
-                 probed_at: str = "") -> List[str]:
+                 probed_at: str = "", confirm: Optional[str] = None) -> List[str]:
     deg = math.degrees(fit.theta)
     tol = th["zero_check_tol"] * pd.scale
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1143,7 +1232,8 @@ def build_output(body: List[str], pd: ProbeData, fit: Fit, job_path: str,
     if pd.sim:
         head.append(f"MSGBOX(SIMULATED alignment - {info}. Preview only.,OKCancel,Virtual Dowel)")
     else:
-        head.append(f"MSGBOX(Virtual Dowel aligned file - {info}. Probe removed and cutter installed - "
+        head.append(f"MSGBOX({msg_safe(confirm.format(info=info))},OKCancel,Virtual Dowel)" if confirm else
+                    f"MSGBOX(Virtual Dowel aligned file - {info}. Probe removed and cutter installed - "
                     "Z zeroed with the cutter - X and Y NOT re-zeroed since probing?,OKCancel,Virtual Dowel)")
     head.append('IF &msganswer = "Cancel" THEN GOTO VDALIGN_QUIT')
 
@@ -1415,6 +1505,11 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
     probed_at = datetime.datetime.fromtimestamp(os.path.getmtime(data_path)).strftime("%Y-%m-%d at %H.%M")
 
     holes, offset, spread = compute_holes(pd)
+    if pd.open:
+        # half-slot touches run along the machine axes: a turned slot needs the board angle from a first fit
+        first = align(design, holes, th, pd.scale, pd.nominal)
+        if abs(first.fit.theta) <= math.radians(th["max_rotation_deg"]):
+            holes = compute_holes(pd, first.fit.theta)[0]
     f1, w1 = hole_checks(pd, holes, spread, th)
     fails += f1
     warns += w1
@@ -1484,6 +1579,18 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
             warns.append(msg + " (allowed by settings - double-check the coordinates)")
         else:
             fails.append(msg + "; or set allow_offaxis_ambiguity to 1 in vd_settings.json")
+
+    if pd.open and box_src != "bad":
+        if box is None:
+            fails.append("half slots need the stock box (enter it for files without a stock size): it tells "
+                         "which edge each slot opens to")
+        else:
+            for i, d in enumerate(design):
+                got = holes[al.perm[i]].open
+                want = open_side(d[0], d[1], box)
+                if got is not None and got != want:
+                    fails.append(f"slot {i + 1} was probed as opening toward {SIDE_NAMES[got]}, but in the design it "
+                                 f"opens toward {SIDE_NAMES[want]} (its nearest stock edge)")
 
     stats: Optional[TransformStats] = None
     data = None
@@ -2307,6 +2414,181 @@ def align_batch(data_path: str, jobs: Sequence[str], design: List[DesignHole], s
                                            f"Could not align this file:\n  {e}", out_path=None)
         out.append((job, res))
     return out
+
+
+@dataclass
+class RoughData:
+    """Slot openings the operator jogged to with the cutter (half-slot mode, side B, before the bay cut)."""
+    units: int
+    sim: bool
+    mode: int
+    date: str
+    points: List[Tuple[float, float]]      # in the listed slot order
+    base: List[Tuple[float, float]]        # %(6)/%(7) at each jog
+    path: str = ""
+
+    @property
+    def scale(self) -> float:
+        return 25.4 if self.units == 1 else 1.0
+
+
+def parse_rough_data(text: str, path: str = "") -> RoughData:
+    """VR,1,units,sim,n,mode / DT,... / R,i,x,y,bx,by (one per opening) / END,n"""
+    header = None
+    date = ""
+    pts: Dict[int, Tuple[Tuple[float, float], Tuple[float, float]]] = {}
+    end = None
+    for n, raw in enumerate(split_lines(text), 1):
+        s = raw.replace('"', "").strip()
+        if not s:
+            continue
+        tag, _, rest = s.partition(",")
+        tag = tag.strip().upper()
+        if tag == "DT":
+            date = rest.strip()
+            continue
+        f = rest.split(",") if rest else []
+        if tag == "VR":
+            if len(f) != 5 or _i(f[0], n) != 1:
+                raise ProbeDataError(f"rough locate data line {n}: unsupported header (different Virtual Dowel version?)")
+            header = dict(units=_i(f[1], n), sim=_i(f[2], n), n=_i(f[3], n), mode=_i(f[4], n))
+        elif tag == "R":
+            if header is None or len(f) != 5:
+                raise ProbeDataError(f"rough locate data line {n}: bad opening record")
+            i = _i(f[0], n)
+            if not 1 <= i <= header["n"] or i in pts:
+                raise ProbeDataError(f"rough locate data line {n}: opening {i} out of range or repeated")
+            pts[i] = ((_f(f[1], n), _f(f[2], n)), (_f(f[3], n), _f(f[4], n)))
+        elif tag == "END":
+            end = _i(f[0], n) if f else -1
+        else:
+            raise ProbeDataError(f"rough locate data line {n}: unknown record {tag!r}")
+    if header is None or header["units"] not in (0, 1):
+        raise ProbeDataError("rough locate data has no valid header - the rough locate was cancelled")
+    if end != header["n"] or len(pts) != header["n"]:
+        raise ProbeDataError("rough locate data is INCOMPLETE - jog to the slot openings again")
+    order = [pts[i] for i in range(1, header["n"] + 1)]
+    return RoughData(units=header["units"], sim=bool(header["sim"]), mode=header["mode"], date=date,
+                     points=[p for p, _ in order], base=[b for _, b in order], path=path)
+
+
+def default_rough_path(bay_path: str, sim: bool) -> str:
+    stem, _ = os.path.splitext(bay_path)
+    return stem + ("_VDROUGHSIM.sbp" if sim else "_VDROUGH.sbp")
+
+
+def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Optional[Box] = None,
+              out_path: Optional[str] = None, th: Optional[Dict[str, float]] = None,
+              allow_old_data: bool = False) -> Result:
+    """Half-slot mode, side B, before anything can be probed: place the bay cut file (made in Fusion)
+    from the slot openings the operator jogged to. Each opening is where a slot axis meets the stock
+    edge, so two of them fix the rotation and both shifts. This rough fit is good to about 0.2 in, so it
+    is only ever applied to the bay file: a file that cuts away from the slots (a part file) is refused,
+    and the output is named _VDROUGH. The probing that follows starts a new session, which deletes it."""
+    th = th or load_settings()
+    with open(data_path, "r", encoding="latin-1", newline="") as fh:
+        rd = parse_rough_data(fh.read(), data_path)
+    s = rd.scale
+    if out_path is None:
+        out_path = default_rough_path(bay_path, rd.sim)
+    real = lambda p: os.path.normcase(os.path.realpath(p))   # noqa: E731
+    if real(out_path) in (real(bay_path), real(data_path)):
+        raise VDError("the output file must not be the bay file or the rough locate data")
+    if os.path.exists(out_path) and not is_aligned_file(out_path):
+        raise VDError(f"{out_path} exists and was not written by Virtual Dowel - rename or move it, then try again")
+    if len(design) != len(rd.points):
+        raise VDError(f"{len(rd.points)} slot openings were jogged but {len(design)} slots are listed")
+    lines, nl = read_text(bay_path)
+    box = material_box(lines) or stock
+    if box is None:
+        raise VDError("the bay cut needs the stock box in side-B coordinates: it tells where each slot opens")
+    retired = [] if rd.sim else retire_other_runs(data_path)
+    if os.path.exists(out_path):
+        os.remove(out_path)                                # ours (checked above): never leave an old one
+
+    fails: List[str] = []
+    warns: List[str] = []
+    notes: List[str] = []
+    age = data_age_minutes(data_path)
+    if age > th["max_data_age_min"] and not allow_old_data:
+        fails.append(f"the rough locate data is {age:.0f} minutes old - jog to the slot openings again")
+    if not rd.sim and rd.mode != 0:
+        fails.append(f"rough locate data was recorded with ShopBot mode {rd.mode} (expected 0 = MOVE)")
+    openings = [slot_opening(d, box) for d in design]
+    fit = fit_rigid(openings, rd.points)
+    spacing = _spacing_errors(openings, rd.points)
+    worst = max(abs(e) for *_, e in spacing)
+    if worst > th["rough_spacing_fail"] * s:
+        fails.append(f"the distance between the jogged openings differs from the design by {worst:.3f} "
+                     f"{'mm' if rd.units else 'in'} (spacing error) - jog to the slot openings again; if the stock "
+                     "does not match the stock box at the slots, use the key notch")
+    if abs(fit.theta) > math.radians(th["max_rotation_deg"]):
+        fails.append(f"rotation {math.degrees(fit.theta):+.2f} deg exceeds the {th['max_rotation_deg']:.1f} deg limit")
+    bx = [b[0] for b in rd.base]
+    by = [b[1] for b in rd.base]
+    offset = (sorted(bx)[len(bx) // 2], sorted(by)[len(by) // 2])
+    if max(max(bx) - min(bx), max(by) - min(by)) > th["offset_consistency"] * s and not rd.sim:
+        fails.append("X/Y zero was changed during the rough locate - jog to the slot openings again")
+        offset = None
+
+    tr = SbpTransformer(fit)
+    body = None
+    try:
+        body = tr.transform(lines)
+    except TransformError as e:
+        fails.append(f"bay file not supported - {e}")
+    warns += tr.stats.warnings
+    reach = th["bay_reach"] * s
+    far = [p for p in tr.stats.cut_points if min(math.dist(p, d[:2]) for d in design) > reach]
+    if body is not None and not tr.stats.cut_points:
+        fails.append("the bay file has no cutting moves")
+    elif far:
+        p = max(far, key=lambda q: min(math.dist(q, d[:2]) for d in design))
+        fails.append(f"this does not look like the bay file: {len(far)} cutting moves are more than {reach:g} from the "
+                     f"slots (e.g. X {p[0]:.3f} Y {p[1]:.3f}). The rough fit is only good to about 0.2 in and must "
+                     "never place a part file")
+    fu = tr.stats.file_units if tr.stats.file_units is not None else detect_units_comment(lines)
+    if fu is not None and fu != rd.units:
+        fails.append(f"bay file is in {'mm' if fu else 'inches'} but the rough locate data is in "
+                     f"{'mm' if rd.units else 'in'}")
+
+    written = None
+    if body is not None and not fails:
+        pd = ProbeData(units=rd.units, sim=rd.sim, tip=0.0, nominal=0.0, nholes=len(design), passes=1,
+                       spin180=False, pin=0, trig=0, mode=rd.mode, date=rd.date, cfg=[], touches=[], path=data_path)
+        summary = "ROUGH ALIGNMENT FOR THE BAY CUT ONLY - from the jogged slot openings - never for part files"
+        probed_at = datetime.datetime.fromtimestamp(os.path.getmtime(data_path)).strftime("%Y-%m-%d at %H.%M")
+        out_lines = build_output(body, pd, fit, bay_path, offset, th, summary, probed_at,
+                                 confirm="ROUGH bay cut only - not a part file - {info}. Bay cutter installed - Z "
+                                         "zeroed - X and Y NOT re-zeroed since the rough locate?")
+        with open(out_path, "wb") as fh:
+            fh.write((nl.join(out_lines) + nl).encode("latin-1", errors="replace"))
+        written = out_path
+        record_output(written, data_path)
+    if retired:
+        notes.append("Removed aligned files from an earlier run: " + "; ".join(os.path.basename(p) for p in retired))
+    u = "mm" if rd.units else "in"
+    L = [f"VIRTUAL DOWEL ROUGH FIT (bay cut)  -  {'FAIL' if fails else 'PASS'}",
+         f"Rough locate data: {data_path}  ({rd.date})" + ("  ** SIMULATED **" if rd.sim else ""),
+         f"Bay file  : {bay_path}", f"Output    : {written or '(none written)'}"]
+    if fails:
+        L += ["", "FAILED CHECKS:"] + ["  - " + f for f in fails]
+    if warns:
+        L += ["", "WARNINGS:"] + ["  - " + w for w in warns]
+    L.append("")
+    for i, (o, p) in enumerate(zip(openings, rd.points), 1):
+        L.append(f"Slot {i} opening: design {o[0]:.3f},{o[1]:.3f} -> jogged {p[0]:.3f},{p[1]:.3f}")
+    L.append(f"Spacing error {worst:+.3f} {u}   Rotation {math.degrees(fit.theta):+.3f} deg   "
+             f"Translation X {fit.tx:+.3f} Y {fit.ty:+.3f} {u}")
+    L += notes
+    report = "\n".join(L)
+    try:
+        with open(os.path.splitext(out_path)[0] + "_report.txt", "w", encoding="utf-8") as fh:
+            fh.write(report + "\n")
+    except OSError:
+        pass
+    return Result(ok=written is not None, report=report, out_path=written, fails=fails, warns=warns,
+                  rotation_deg=math.degrees(fit.theta), spacing_err=worst, shift=(fit.tx, fit.ty))
 
 
 def batch_summary(results: Sequence[Tuple[str, Result]]) -> str:

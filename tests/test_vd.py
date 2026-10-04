@@ -1335,6 +1335,295 @@ class TestEndToEnd(unittest.TestCase):
 
 
 # =====================================================================================
+# ---- half slots: holes with one open side at the stock edge (thick stock) --------------------------
+def _rot(th, v):
+    c, s = math.cos(th), math.sin(th)
+    return (c * v[0] - s * v[1], s * v[0] + c * v[1])
+
+
+def slot_readings(c, R, theta, open_dir, r=0.0625, push=(0.0, 0.0), ecc=(0.0, 0.0), back=0.15, start_off=0.02,
+                  passes=2, noise=0.0, rng=None, decimals=3):
+    """Touch readings for one half slot, from exact geometry (independent of vd_align).
+    c: centre of the round end (machine); R: half-width; theta: how far the slot is turned;
+    open_dir: (axis, sign) of the opening in the design frame. The routine's pattern: two wall touches
+    along the machine cross axis from a point `back` behind the end-circle centre, then the end touch along
+    the machine axis from their midpoint. Reading = ball centre at contact + push[axis] in the direction
+    of motion - ecc (SB3 reports the spindle axis), then noise and SB3's rounding."""
+    rng = rng or __import__("random").Random(7)
+    ao, so = open_dir
+    ac = 3 - ao
+    e_in = (-so, 0.0) if ao == 1 else (0.0, -so)                 # machine direction of the end touch
+    e_c = (1.0, 0.0) if ac == 1 else (0.0, 1.0)                    # machine direction of the + wall touch
+    u, v = _rot(theta, e_in), _rot(theta, e_c)                     # slot axis (inward) and its normal
+    rho = R - r
+    out = []
+
+    def read(pt, e, axis):
+        x = pt[0] + push[axis - 1] * e[0] - ecc[0] + rng.gauss(0, noise)
+        y = pt[1] + push[axis - 1] * e[1] - ecc[1] + rng.gauss(0, noise)
+        return (round(x, decimals), round(y, decimals)) if decimals is not None else (x, y)
+
+    for k in range(1, passes + 1):
+        s0 = (c[0] - back * u[0] + start_off * v[0], c[1] - back * u[1] + start_off * v[1])
+        walls = {}
+        for sg in (1, -1):
+            e = (sg * e_c[0], sg * e_c[1])
+            d0 = (s0[0] - c[0]) * v[0] + (s0[1] - c[1]) * v[1]
+            ev = e[0] * v[0] + e[1] * v[1]
+            kk = max((t - d0) / ev for t in (rho, -rho))
+            p = (s0[0] + kk * e[0], s0[1] + kk * e[1])
+            walls[sg] = read(p, e, ac)
+            out.append((k, ac, sg, walls[sg]))
+        m = ((walls[1][0] + walls[-1][0]) / 2, (walls[1][1] + walls[-1][1]) / 2)
+        w = (c[0] - m[0], c[1] - m[1])
+        we = w[0] * e_in[0] + w[1] * e_in[1]
+        kk = we + math.sqrt(we * we - (w[0] ** 2 + w[1] ** 2) + rho * rho)
+        p = (m[0] + kk * e_in[0], m[1] + kk * e_in[1])
+        along = (p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1]
+        assert along > 0, "end touch hit a wall before the round end"
+        out.append((k, ao, -so, read(p, e_in, ao)))
+    return out
+
+
+def slot_data_text(slots, theta, tip=0.125, passes=2, units=0, spin_ecc=None, base=(3.25, -1.5), **kw):
+    """slots: [(centre_machine, width, open_dir)]. spin_ecc: stylus offset; probes both spindle orientations."""
+    orients = [0, 1] if spin_ecc is not None else [0]
+    rows = [f"VD,1,{units},0,{tip},{max(w for _, w, _ in slots)},{len(slots)},{passes},{len(orients) - 1},1,0,0",
+            "CFG,.3,.08,.03,.4,.08,.3", "DT,Monday October 05 2026 10:00:00"]
+    for h, (c, wdt, od) in enumerate(slots, 1):
+        rows.append(f"O,{h},{od[0]},{od[1]}")
+        for o in orients:
+            ecc = (0.0, 0.0) if spin_ecc is None else (spin_ecc if o == 0 else (-spin_ecc[0], -spin_ecc[1]))
+            kw.setdefault("r", tip / 2)                    # true ball radius; `tip` is the setting
+            for k, ax, sg, (x, y) in slot_readings(c, wdt / 2, theta, od, passes=passes, ecc=ecc, **kw):
+                rows.append(f"T,{h},{o},{k},{ax},{sg},{x},{y},-0.4,{base[0]},{base[1]}")
+    rows.append(f"END,{len(slots)}")
+    return "\n".join(rows) + "\n"
+
+
+# slots on the X centreline of the 24 x 30 VCarve fixture: bottom edge (opens -Y) and top edge (opens +Y)
+SLOTS = [(12.0, 1.5, 0.5), (12.0, 28.5, 0.625)]
+SLOT_OPEN = [(2, -1), (2, 1)]
+STOCK24 = (0.0, 0.0, 24.0, 30.0)
+
+
+class TestHalfSlots(unittest.TestCase):
+    """Half slots (thick stock): the reference holes moved out to the stock edges, cut from one face only."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.job = os.path.join(self.tmp, "sideB.sbp")
+        shutil.copy(JOB, self.job)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def placed(self, deg, tx, ty, design=SLOTS, opens=SLOT_OPEN):
+        return [(T(deg, tx, ty, d[:2]), d[2], od) for d, od in zip(design, opens)]
+
+    def data(self, deg, tx, ty, name="probe.csv", **kw):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w") as fh:
+            fh.write(slot_data_text(self.placed(deg, tx, ty), math.radians(deg), **kw))
+        return path
+
+    def test_centre_of_a_turned_slot_in_every_direction(self):
+        for od in ((1, -1), (1, 1), (2, -1), (2, 1)):
+            for deg in (0.0, 3.0, -5.0):
+                th = math.radians(deg)
+                slots = [((5.0, 7.0), 0.5, od), ((25.0, 9.0), 0.625, od)]
+                pd = va.parse_probe_data(slot_data_text(slots, th, decimals=None))
+                self.assertEqual(pd.open, {1: od, 2: od})
+                holes = va.compute_holes(pd, th)[0]
+                for h, (c, wdt, _) in zip(holes, slots):
+                    self.assertLess(math.dist(h.center, c), 2e-6, (od, deg))
+                    self.assertAlmostEqual(h.dia, wdt, delta=2e-6)
+                    self.assertEqual(h.open, od)
+                    self.assertGreater(h.wall_margin, 0.1)
+
+    def test_errors_that_push_every_touch_cancel(self):
+        # pretravel/latency/backlash the same on both axes, and a wrong ball setting: the wall pair measures
+        # the same push as the end touch, so each centre is exact on its own
+        th = math.radians(2.0)
+        slots = [((5.0, 7.0), 0.5, (1, -1)), ((25.0, 9.0), 0.625, (1, 1))]
+        pd = va.parse_probe_data(slot_data_text(slots, th, tip=0.110, push=(0.004, 0.004), r=0.0625, decimals=None))
+        for h, (c, _, _) in zip(va.compute_holes(pd, th)[0], slots):
+            self.assertLess(math.dist(h.center, c), 2e-5)
+
+    def test_unequal_push_cancels_between_opposite_slots(self):
+        # more push along X than across: each end centre is off along its slot, in opposite directions,
+        # so the fit's position is unchanged and only the spacing reads short
+        deg, tx, ty = 1.5, 2.0, -1.0
+        design = [(1.5, 15.0, 0.5), (22.5, 15.0, 0.625)]
+        opens = [(1, -1), (1, 1)]
+        slots = [(T(deg, tx, ty, d[:2]), d[2], od) for d, od in zip(design, opens)]
+        pd = va.parse_probe_data(slot_data_text(slots, math.radians(deg), push=(0.003, 0.0), decimals=None))
+        holes = va.compute_holes(pd, math.radians(deg))[0]
+        al = va.align(design, holes, va.DEFAULTS, 1.0, pd.nominal)
+        self.assertEqual(al.failures, [])
+        self.assertAlmostEqual(math.degrees(al.fit.theta), deg, delta=1e-4)
+        for d in design:
+            self.assertLess(math.dist(al.fit.point(*d[:2]), T(deg, tx, ty, d[:2])), 1e-4)
+        self.assertAlmostEqual(al.spacing[0][3], -0.006, delta=2e-4)
+
+    def test_spin180_cancels_stylus_runout(self):
+        th = math.radians(-1.0)
+        slots = [((5.0, 7.0), 0.5, (1, -1)), ((25.0, 9.0), 0.625, (1, 1))]
+        pd = va.parse_probe_data(slot_data_text(slots, th, spin_ecc=(0.003, -0.002), decimals=None))
+        for h, (c, _, _) in zip(va.compute_holes(pd, th)[0], slots):
+            self.assertLess(math.dist(h.center, c), 2e-6)
+            self.assertAlmostEqual(math.hypot(*h.ecc), math.hypot(0.003, 0.002), delta=1e-6)
+
+    def test_full_alignment_of_a_job(self):
+        deg, tx, ty = 0.8, 1.7, 0.6
+        data = self.data(deg, tx, ty, noise=0.0002, passes=3)
+        res = va.run_alignment(data, self.job, SLOTS)
+        self.assertTrue(res.ok, res.report)
+        self.assertAlmostEqual(res.rotation_deg, deg, delta=0.005)
+        with open(res.out_path, encoding="latin-1") as fh:
+            out = fh.read()
+        sim_sbp.compare(JOB_TEXT, out, math.radians(deg), tx, ty, tol=0.002)
+
+    def test_slot_must_open_where_the_design_says(self):
+        path = os.path.join(self.tmp, "probe.csv")
+        with open(path, "w") as fh:          # both probed as opening toward -Y: slot 2 opens toward +Y
+            fh.write(slot_data_text(self.placed(0.5, 1.0, 1.0, opens=[(2, -1), (2, -1)]), math.radians(0.5)))
+        res = va.run_alignment(path, self.job, SLOTS)
+        self.assertFalse(res.ok)
+        self.assertIn("opens toward", res.report)
+
+    def test_wall_touches_inside_the_round_end_fail(self):
+        res = va.run_alignment(self.data(0.5, 1.0, 1.0, back=-0.1), self.job, SLOTS)
+        self.assertFalse(res.ok)
+        self.assertIn("round end", res.report)
+
+    def test_half_slots_need_the_stock_box(self):
+        fusion = os.path.join(self.tmp, "fusion.sbp")
+        shutil.copy(FUSION, fusion)
+        design = [(1.5, 15.0, 0.5), (22.5, 15.0, 0.625)]        # on the flip axis Y = H/2
+        opens = [(1, -1), (1, 1)]
+        path = os.path.join(self.tmp, "probe.csv")
+        with open(path, "w") as fh:
+            fh.write(slot_data_text(self.placed(0.3, 1.0, 1.0, design, opens), math.radians(0.3)))
+        res = va.run_alignment(path, fusion, design)
+        self.assertFalse(res.ok)
+        self.assertIn("stock box", res.report)
+        res = va.run_alignment(path, fusion, design, stock=STOCK24)
+        self.assertTrue(res.ok, res.report)
+
+    def test_probe_data_rules_for_slots(self):
+        good = slot_data_text(self.placed(0.0, 0.0, 0.0), 0.0)
+        for bad, msg in ((good.replace("O,2,2,1", "O,2,3,1"), "open side"),
+                         (good.replace("O,2,2,1", "O,3,2,1"), "out of range")):
+            with self.assertRaises(va.ProbeDataError) as cm:
+                va.compute_holes(va.parse_probe_data(bad))
+            self.assertIn(msg, str(cm.exception))
+        # a touch toward the open side means the data and the slot disagree
+        extra = good.replace("END,2", "T,2,0,1,2,1,12.0,28.9,-0.4,3.25,-1.5\nEND,2")
+        with self.assertRaises(va.ProbeDataError) as cm:
+            va.compute_holes(va.parse_probe_data(extra))
+        self.assertIn("open side", str(cm.exception))
+
+
+# ---- rough fit: places only the bay cut file, from the two jogged slot openings ---------------------
+BAY_TEXT = """'bay cut for the half slots (Fusion style, side B coordinates)
+SA
+IF %(25)=1 THEN GOTO UNIT_ERROR
+MS,1.0,0.5
+J3,12.,-0.5,1.0
+M3,12.,-0.5,0.4
+M3,12.,2.2,0.4
+M3,12.,-0.5,0.4
+JZ,1.0
+J2,12.,30.5
+M3,12.,30.5,0.4
+M3,12.,27.8,0.4
+M3,12.,30.5,0.4
+JZ,1.0
+JH
+END
+UNIT_ERROR:
+MSGBOX(The file is in inches,0,Units)
+END
+"""
+
+
+def rough_text(points, base=(3.25, -1.5), units=0, sim=0, mode=0):
+    rows = [f"VR,1,{units},{sim},{len(points)},{mode}", "DT,Monday October 05 2026 10:00:00"]
+    rows += [f"R,{i},{x:.3f},{y:.3f},{base[0]},{base[1]}" for i, (x, y) in enumerate(points, 1)]
+    rows.append(f"END,{len(points)}")
+    return "\n".join(rows) + "\n"
+
+
+class TestRoughFit(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.bay = os.path.join(self.tmp, "bays.sbp")
+        with open(self.bay, "w") as fh:
+            fh.write(BAY_TEXT)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def jog(self, deg, tx, ty, err=((0.06, -0.04), (-0.05, 0.07)), openings=((12.0, 0.0), (12.0, 30.0))):
+        path = os.path.join(self.tmp, "rough.csv")
+        pts = [(p[0] + e[0], p[1] + e[1]) for p, e in zip((T(deg, tx, ty, o) for o in openings), err)]
+        with open(path, "w") as fh:
+            fh.write(rough_text(pts))
+        return path
+
+    def test_openings_are_where_the_slot_axes_meet_the_box(self):
+        self.assertEqual(va.slot_opening((12.0, 1.5, 0.5), STOCK24), (12.0, 0.0))
+        self.assertEqual(va.slot_opening((12.0, 28.5, 0.625), STOCK24), (12.0, 30.0))
+        self.assertEqual(va.slot_opening((1.5, 15.0, 0.5), STOCK24), (0.0, 15.0))
+        self.assertEqual(va.open_side(22.5, 15.0, STOCK24), (1, 1))
+
+    def test_bay_file_is_placed_from_the_jogged_openings(self):
+        deg, tx, ty = 2.5, 3.0, -2.0
+        res = va.run_rough(self.jog(deg, tx, ty), self.bay, SLOTS, stock=STOCK24)
+        self.assertTrue(res.ok, res.report)
+        self.assertTrue(res.out_path.endswith("bays_VDROUGH.sbp"))
+        out = open(res.out_path, encoding="latin-1").read()
+        self.assertTrue(va.is_aligned_file(res.out_path))
+        self.assertIn("ROUGH", out)
+        self.assertEqual(sbp_lint_problems(out), [])
+        fit = va.Fit(math.radians(res.rotation_deg), res.shift[0], res.shift[1], [])
+        sim_sbp.compare(BAY_TEXT, out, fit.theta, fit.tx, fit.ty, tol=1e-5)
+        for d in SLOTS:                                       # the bays land within 0.2 in of the slots
+            self.assertLess(math.dist(fit.point(*d[:2]), T(deg, tx, ty, d[:2])), 0.2)
+        va.new_session()                                      # the precise probing starts a new session
+        self.assertFalse(os.path.exists(res.out_path))
+
+    def test_a_part_file_is_refused_as_the_bay_file(self):
+        job = os.path.join(self.tmp, "sideB.sbp")
+        shutil.copy(JOB, job)
+        res = va.run_rough(self.jog(1.0, 1.0, 1.0), job, SLOTS, stock=STOCK24)
+        self.assertFalse(res.ok)
+        self.assertIsNone(res.out_path)
+        self.assertIn("bay file", res.report)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "sideB_VDROUGH.sbp")))
+
+    def test_openings_jogged_in_the_wrong_place_fail(self):
+        res = va.run_rough(self.jog(1.0, 1.0, 1.0, err=((0.0, 0.0), (0.0, -2.0))), self.bay, SLOTS, stock=STOCK24)
+        self.assertFalse(res.ok)
+        self.assertIn("spacing", res.report)
+
+    def test_the_bay_file_needs_the_stock_box(self):
+        with self.assertRaises(va.VDError):
+            va.run_rough(self.jog(1.0, 1.0, 1.0), self.bay, SLOTS)
+
+    def test_rough_data_rules(self):
+        path = self.jog(0.0, 0.0, 0.0)
+        text = open(path).read()
+        for bad in (text.replace("END,2\n", ""), text.replace("VR,1,0,0,2,0", "VR,2,0,0,2,0"),
+                    text.replace("R,2,", "R,3,")):
+            with open(path, "w") as fh:
+                fh.write(bad)
+            with self.assertRaises(va.ProbeDataError):
+                va.run_rough(path, self.bay, SLOTS, stock=STOCK24)
+
+
 class TestBatch(unittest.TestCase):
     """Several side-B files (one per tool) aligned from one probing run in one go."""
     setUp = TestEndToEnd.setUp
