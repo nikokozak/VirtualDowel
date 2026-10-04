@@ -1,0 +1,512 @@
+<!doctype html>
+<!-- Virtual Dowel - Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thick stock guide</title>
+<meta name="description" content="Virtual Dowel: how to set up half slots and bays in Fusion for thick stock, and how the probing works.">
+<style>
+:root {
+  --paper: #F6F8FA;
+  --ink: #1B2533;
+  --ink-2: #4E5A69;
+  --rule: #C9D1DA;
+  --wood: #EAD9B2;
+  --wood-line: #A88A55;
+  --wood-far: #F2E8D2;
+  --board: #D5DBE2;
+  --board-line: #8C97A4;
+  --probe: #0E7490;
+  --probe-tint: rgba(14, 116, 144, 0.12);
+  --cut: #6D3FC0;
+  --cut-tint: rgba(109, 63, 192, 0.13);
+  --cut-tint-2: rgba(109, 63, 192, 0.30);
+  --warn: #9A4A00;
+  --code-bg: #E8EDF2;
+  --head: "Bahnschrift", "DIN Alternate", "Arial Narrow", "Segoe UI", sans-serif;
+  --body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: Consolas, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161C; --ink: #E4E8EE; --ink-2: #A3AEBC; --rule: #303946;
+    --wood: #5A4730; --wood-line: #9C7F50; --wood-far: #3A2F22; --board: #2A313B; --board-line: #5F6B79;
+    --probe: #3CC0D6; --probe-tint: rgba(60, 192, 214, 0.15);
+    --cut: #A88BEF; --cut-tint: rgba(168, 139, 239, 0.15); --cut-tint-2: rgba(168, 139, 239, 0.32);
+    --warn: #F0A55A; --code-bg: #1E252E;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161C; --ink: #E4E8EE; --ink-2: #A3AEBC; --rule: #303946;
+  --wood: #5A4730; --wood-line: #9C7F50; --wood-far: #3A2F22; --board: #2A313B; --board-line: #5F6B79;
+  --probe: #3CC0D6; --probe-tint: rgba(60, 192, 214, 0.15);
+  --cut: #A88BEF; --cut-tint: rgba(168, 139, 239, 0.15); --cut-tint-2: rgba(168, 139, 239, 0.32);
+  --warn: #F0A55A; --code-bg: #1E252E;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.55 var(--body);
+  padding: 32px 16px 80px;
+}
+main { max-width: 940px; margin: 0 auto; }
+.prose, main > p, main > ul, main > ol, main > table, main > pre, main > h2, main > h3, main > aside { max-width: 70ch; }
+h1, h2, h3, .tb, svg text { font-family: var(--head); }
+h1 { font-size: 2.6rem; line-height: 1.05; font-weight: 600; font-stretch: condensed; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 1.55rem; font-weight: 600; margin: 56px 0 10px; padding-top: 14px; border-top: 2px solid var(--ink); }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 28px 0 6px; }
+p { margin: 0 0 14px; }
+a { color: var(--probe); }
+a:focus-visible, summary:focus-visible { outline: 3px solid var(--probe); outline-offset: 2px; }
+code, pre { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 4px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+.lede { font-size: 1.12rem; color: var(--ink-2); max-width: 62ch; }
+
+/* drawing title block */
+header.sheet { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 28px; align-items: end; margin-bottom: 26px; }
+.tb { border: 2px solid var(--ink); border-collapse: collapse; font-size: 0.86rem; width: 330px; }
+.tb th, .tb td { border: 1px solid var(--ink); padding: 4px 8px; text-align: left; vertical-align: top; }
+.tb th { font-weight: 400; color: var(--ink-2); width: 6.5em; }
+.tb .status td { color: var(--warn); font-weight: 600; }
+@media (max-width: 760px) { header.sheet { grid-template-columns: 1fr; } .tb { width: 100%; } }
+
+nav.toc { margin: 8px 0 0; font-size: 0.95rem; columns: 2 16em; column-gap: 32px; max-width: 70ch; }
+nav.toc ol { margin: 0; padding-left: 1.4em; }
+nav.toc li { break-inside: avoid; }
+
+/* figures */
+figure { margin: 22px 0 26px; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { font-size: 0.92rem; color: var(--ink-2); margin-top: 8px; max-width: 74ch; }
+figcaption b { color: var(--ink); font-weight: 600; }
+.key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 0.88rem; color: var(--ink-2); margin-top: 6px; }
+.key span::before { content: ""; display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--ink-2); }
+.key .k-wood::before { background: var(--wood); }
+.key .k-cut::before { background: var(--cut-tint-2); border-color: var(--cut); }
+.key .k-probe::before { background: var(--probe-tint); border-color: var(--probe); }
+
+/* svg styling through tokens */
+.sv-ink { stroke: var(--ink); fill: none; stroke-width: 1.4; }
+.sv-thin { stroke: var(--ink-2); fill: none; stroke-width: 1; }
+.sv-wood { fill: url(#hatch-wood); stroke: var(--ink); stroke-width: 1.4; }
+.sv-woodfar { fill: var(--wood-far); stroke: var(--ink-2); stroke-width: 1; }
+.sv-sheet { fill: var(--wood-far); stroke: var(--ink); stroke-width: 1.4; }
+.sv-woodfill { fill: var(--wood-far); stroke: none; }
+.sv-board { fill: url(#hatch-board); stroke: var(--board-line); stroke-width: 1; }
+.sv-cut { fill: var(--cut-tint); stroke: var(--cut); stroke-width: 1.4; }
+.sv-cut2 { fill: var(--cut-tint-2); stroke: var(--cut); stroke-width: 1.4; }
+.sv-probe { fill: var(--paper); stroke: var(--probe); stroke-width: 1.6; }
+.sv-probefill { fill: var(--probe); stroke: none; }
+.sv-ghost { fill: none; stroke: var(--probe); stroke-width: 1.3; stroke-dasharray: 5 4; }
+.sv-band { fill: var(--probe-tint); stroke: var(--probe); stroke-width: 1; stroke-dasharray: 3 3; }
+.sv-path { fill: none; stroke: var(--probe); stroke-width: 2; }
+.sv-center { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 14 4 3 4; fill: none; }
+.sv-dim { stroke: var(--ink); stroke-width: 1; fill: none; }
+svg text { fill: var(--ink); font-size: 14px; }
+svg .t-small { font-size: 12.5px; fill: var(--ink-2); }
+svg .t-probe { fill: var(--probe); }
+svg .t-cut { fill: var(--cut); }
+svg .t-num { font-size: 12px; font-weight: 700; fill: var(--paper); text-anchor: middle; dominant-baseline: central; }
+svg .num { fill: var(--probe); }
+.wood-l { stroke: var(--wood-line); stroke-width: 1; }
+.board-l { stroke: var(--board-line); stroke-width: 1; }
+
+/* tables */
+table.rules { border-collapse: collapse; width: 100%; font-size: 0.94rem; margin: 10px 0 18px; }
+table.rules th, table.rules td { text-align: left; vertical-align: top; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--rule); }
+table.rules th { font-family: var(--head); font-weight: 600; border-bottom: 2px solid var(--ink); }
+table.rules td:nth-child(3) { font-variant-numeric: tabular-nums; }
+table.rules code { overflow-wrap: anywhere; }
+@media (min-width: 640px) { table.rules td:nth-child(3) { white-space: nowrap; } }
+
+/* procedures: real sequences only */
+ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 10px 0 18px; }
+ol.steps > li { counter-increment: s; position: relative; padding: 0 0 12px 46px; }
+ol.steps > li::before {
+  content: counter(s); position: absolute; left: 0; top: -1px; width: 30px; height: 30px;
+  border: 2px solid var(--ink); border-radius: 50%; text-align: center; line-height: 26px;
+  font-family: var(--head); font-weight: 600;
+}
+ol.steps > li.machine::before { border-color: var(--probe); color: var(--probe); }
+ol.steps .where { font-family: var(--head); color: var(--ink-2); font-size: 0.92rem; display: block; }
+
+aside.note { border-left: 4px solid var(--warn); padding: 4px 0 4px 14px; margin: 16px 0; }
+aside.note p:last-child { margin-bottom: 0; }
+
+footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--ink-2); }
+
+@media print {
+  :root { --paper: #fff; --code-bg: #f1f1f1; }
+  body { padding: 0; font-size: 11pt; }
+  h2 { break-after: avoid; }
+  figure, table, ol.steps > li { break-inside: avoid; }
+  nav.toc { display: none; }
+  a { color: inherit; text-decoration: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+
+<header class="sheet">
+  <div>
+    <h1>Thick stock with half slots</h1>
+    <p class="lede">How to set up the slots and bays in Fusion so that Virtual Dowel can find side B on stock too thick to drill through, and what the probe does at each slot.</p>
+  </div>
+  <table class="tb" aria-label="Document details">
+    <tr><th>Document</th><td>Virtual Dowel guide</td></tr>
+    <tr><th>Version</th><td>2.1, 2026-10-04</td></tr>
+    <tr class="status"><th>Status</th><td>Routine, rough fit and size calculator tested in the simulator. Not yet run on the machine. The window steps for half slots are not built yet.</td></tr>
+    <tr><th>Owner</th><td>Nikolai Kozak, proprietary</td></tr>
+  </table>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#why">Why half slots</a></li>
+    <li><a href="#scope">What Virtual Dowel does and does not do</a></li>
+    <li><a href="#sideA">Side A in Fusion</a></li>
+    <li><a href="#sideB">Side B in Fusion: the bays</a></li>
+    <li><a href="#sizes">Sizes</a></li>
+    <li><a href="#machine">At the machine</a></li>
+    <li><a href="#routine">What the probe does at each slot</a></li>
+    <li><a href="#rough">How the bay file is placed</a></li>
+    <li><a href="#checks">Checks</a></li>
+    <li><a href="#messages">Messages and what to do</a></li>
+    <li><a href="#through">Through slots</a></li>
+    <li><a href="#accuracy">Accuracy</a></li>
+  </ol>
+</nav>
+
+<h2 id="why">1. Why half slots</h2>
+<p>The hole mode needs a reference hole through the whole board. The cutter for that hole must start above the board, so the Z travel must take the board, a cutter as long as the board is thick, and the collet: about 2 to 2.5 times the thickness. Thick stock does not fit.</p>
+<p>A half slot is a reference hole moved out to the stock edge, so it opens to the outside. Side A cuts it from face A to a little past mid-thickness, from outside the board. On side B, a bay cut from face B opens a path down to it. The probe then comes in from the side and probes the slot as it probes a hole. Each side cuts only about half the thickness, the same as the flip-milling job itself needs. <b>So the half-slot mode works wherever the flip-milling job works.</b></p>
+
+<figure>
+<svg viewBox="0 0 900 540" role="img" aria-labelledby="f1t f1d">
+  <title id="f1t">Side B, section on the slot axis</title>
+  <desc id="f1d">The board lies face A down on the spoilboard. The side-A slot rises from the spoilboard to 1.75 inches. The bay is cut from the top down to 1.6 inches, so it overlaps the slot. The probe is parked outside the edge with its ball between 0.65 and 1.49 inches above the spoilboard; dashed, it is shown again at the end of the slot, where its body is still inside the bay.</desc>
+  <defs>
+    <pattern id="hatch-wood" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="9" height="9" fill="var(--wood)"/><line x1="0" y1="0" x2="0" y2="9" class="wood-l"/>
+    </pattern>
+    <pattern id="hatch-board" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+      <rect width="7" height="7" fill="var(--board)"/><line x1="0" y1="0" x2="0" y2="7" class="board-l"/>
+    </pattern>
+    <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--ink)" stroke-width="1.3"/></marker>
+    <marker id="ar1p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--probe)" stroke-width="1.5"/></marker>
+  </defs>
+  <!-- spoilboard -->
+  <rect x="30" y="470" width="700" height="30" class="sv-board"/>
+  <text x="40" y="520" class="t-small">spoilboard</text>
+  <!-- stock beyond the section, then the two cuts, then the material cut by the section plane -->
+  <rect x="250" y="140" width="440" height="330" class="sv-woodfar"/>
+  <rect x="250" y="140" width="259.9" height="154" class="sv-cut"/>
+  <rect x="250" y="277.5" width="171.9" height="192.5" class="sv-cut2"/>
+  <path d="M421.9,294 H509.9 V140 H690 L680,200 L700,260 L680,320 L700,380 L690,470 H421.9 Z" class="sv-wood"/>
+  <line x1="250" y1="140" x2="250" y2="470" class="sv-ink"/>
+  <line x1="236" y1="452" x2="249" y2="452" class="sv-thin"/>
+  <text x="160" y="456" class="t-small">stock edge</text>
+  <text x="600" y="132" class="t-small">face B, up</text>
+  <text x="440" y="462" class="t-small">face A, on the spoilboard</text>
+  <text x="262" y="184" class="t-cut">bay, cut on side B</text>
+  <text x="262" y="201" class="t-small">from your Fusion file</text>
+  <text x="262" y="430" class="t-cut">side-A slot</text>
+  <text x="262" y="447" class="t-small">cut from face A</text>
+  <!-- round-end centre -->
+  <line x1="387.5" y1="96" x2="387.5" y2="508" class="sv-center"/>
+  <text x="396" y="524" class="t-small">round-end centre: the slot's reference point</text>
+  <!-- park band and parked probe -->
+  <rect x="120" y="306.3" width="88" height="92.2" class="sv-band"/>
+  <text x="30" y="330" class="t-probe">park the</text>
+  <text x="30" y="347" class="t-probe">ball here</text>
+  <text x="30" y="366" class="t-small">0.65 to 1.49</text>
+  <text x="30" y="381" class="t-small">above the board</text>
+  <rect x="147" y="22" width="140" height="18" class="sv-probe"/>
+  <rect x="173" y="40" width="88" height="202.4" class="sv-probe"/>
+  <rect x="212.6" y="242.4" width="8.8" height="103.1" class="sv-probe"/>
+  <circle cx="217" cy="352.4" r="6.9" class="sv-probefill"/>
+  <text x="96" y="140" class="t-probe">probe body</text>
+  <text x="96" y="157" class="t-small">0.8 dia</text>
+  <text x="128" y="270" class="t-small">stem</text>
+  <!-- probe at the end of the slot -->
+  <rect x="345" y="22" width="140" height="18" class="sv-ghost"/>
+  <rect x="371" y="40" width="88" height="202.4" class="sv-ghost"/>
+  <rect x="410.6" y="242.4" width="8.8" height="103.1" class="sv-ghost"/>
+  <circle cx="415" cy="352.4" r="6.9" class="sv-ghost"/>
+  <line x1="232" y1="352.4" x2="402" y2="352.4" class="sv-path" marker-end="url(#ar1p)"/>
+  <text x="292" y="372" class="t-probe">in along the slot</text>
+  <!-- dimensions -->
+  <line x1="387.5" y1="112" x2="509.9" y2="112" class="sv-dim" marker-start="url(#ar1)" marker-end="url(#ar1)"/>
+  <line x1="509.9" y1="104" x2="509.9" y2="140" class="sv-thin"/>
+  <text x="520" y="117">1.113 past the centre</text>
+  <line x1="745" y1="140" x2="745" y2="470" class="sv-dim" marker-start="url(#ar1)" marker-end="url(#ar1)"/>
+  <line x1="700" y1="140" x2="752" y2="140" class="sv-thin"/>
+  <text x="752" y="310" transform="rotate(-90 752 310)" text-anchor="middle">stock 3.000</text>
+  <line x1="795" y1="277.5" x2="795" y2="470" class="sv-dim" marker-start="url(#ar1)" marker-end="url(#ar1)"/>
+  <line x1="425" y1="277.5" x2="802" y2="277.5" class="sv-thin" stroke-dasharray="2 4"/>
+  <text x="802" y="374" transform="rotate(-90 802 374)" text-anchor="middle">side-A slot 1.750</text>
+  <line x1="845" y1="140" x2="845" y2="294" class="sv-dim" marker-start="url(#ar1)" marker-end="url(#ar1)"/>
+  <line x1="512" y1="294" x2="852" y2="294" class="sv-thin" stroke-dasharray="2 4"/>
+  <text x="852" y="217" transform="rotate(-90 852 217)" text-anchor="middle">bay 1.400</text>
+  <text x="560" y="314" class="t-small">bay floor 1.600 above the board</text>
+</svg>
+<figcaption><b>Figure 1.</b> Side B, cut on the slot axis, for the worked example in <a href="#sizes">section 5</a>: 3 in stock, side-A slot 1.75 in deep, bay floor at 1.6 in, probe body 0.8 in below the stock top while probing. The bay overlaps the slot by 0.15 in. Dashed: the probe at the end of the slot. Its body is still inside the bay. Distances in inches.</figcaption>
+<div class="key"><span class="k-wood">stock (hatched where cut by the section)</span><span class="k-cut">your cuts: the bay (light) and the side-A slot (dark)</span><span class="k-probe">the probe and where to park it</span></div>
+</figure>
+
+<h2 id="scope">2. What Virtual Dowel does and does not do</h2>
+<p><b>Virtual Dowel probes, checks and aligns your files. It never makes toolpaths.</b> You design the slots, the bays and the side-B job in Fusion, or in any CAM that writes ShopBot OpenSBP files. Virtual Dowel then:</p>
+<ul>
+  <li>gives you the minimum sizes for the slots and bays, from your probe and stock (<a href="#sizes">section 5</a>);</li>
+  <li>rotates and shifts your bay file roughly, from where you jog to the slot openings (<a href="#rough">section 8</a>);</li>
+  <li>probes the slots and rotates and shifts your side-B job files exactly, as the hole mode does.</li>
+</ul>
+
+<h2 id="sideA">3. Side A in Fusion</h2>
+<p>Side A is placed as in the hole mode: zero X and Y at the corner of the Setup 1 WCS and run the job. Side A is never probed.</p>
+
+<figure>
+<svg viewBox="0 0 900 520" role="img" aria-labelledby="f2t f2d">
+  <title id="f2t">Side A, top view</title>
+  <desc id="f2d">A 30 by 20 inch board. The flip axis runs left to right through the middle. Slot 1, 0.625 inches wide, enters the left edge on the flip axis; slot 2, 0.75 inches wide, enters the right edge on the flip axis. The Setup 1 WCS is at the front-left corner. An optional key notch is in the front edge.</desc>
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--ink)" stroke-width="1.3"/></marker>
+    <marker id="ar2c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--cut)" stroke-width="1.5"/></marker>
+  </defs>
+  <rect x="120" y="40" width="660" height="440" class="sv-sheet"/>
+  <path d="M300,170 C380,120 560,130 620,190 C660,240 640,330 560,350 C470,372 340,360 290,300 C255,258 260,200 300,170 Z" class="sv-thin" stroke-dasharray="6 5"/>
+  <text x="420" y="304" class="t-small">your part</text>
+  <!-- flip axis -->
+  <line x1="70" y1="260" x2="830" y2="260" class="sv-center"/>
+  <text x="172" y="284" class="t-small">flip axis, Y = H/2</text>
+  <!-- slots (enlarged callouts) -->
+  <path d="M120,253.1 H147.5 A6.9,6.9 0 0 1 147.5,266.9 H120" class="sv-cut2"/>
+  <path d="M780,251.75 H752.5 A8.25,8.25 0 0 0 752.5,268.25 H780" class="sv-cut2"/>
+  <circle cx="134" cy="260" r="34" class="sv-thin"/>
+  <circle cx="766" cy="260" r="34" class="sv-thin"/>
+  <text x="168" y="214" class="t-cut">slot 1, 0.625 wide</text>
+  <text x="168" y="231" class="t-small">cut from outside, inward</text>
+  <text x="664" y="314" class="t-cut">slot 2, 0.75 wide</text>
+  <text x="664" y="331" class="t-small">a different width</text>
+  <!-- key notch (optional) -->
+  <rect x="293" y="469" width="6" height="11" class="sv-cut2" stroke-dasharray="3 2"/>
+  <text x="310" y="462" class="t-small">key notch, only for irregular stock</text>
+  <!-- WCS -->
+  <line x1="120" y1="480" x2="190" y2="480" class="sv-ink" marker-end="url(#ar2)" stroke-width="2"/>
+  <line x1="120" y1="480" x2="120" y2="410" class="sv-ink" marker-end="url(#ar2)" stroke-width="2"/>
+  <text x="196" y="485">X</text>
+  <text x="110" y="402">Y</text>
+  <text x="128" y="505" class="t-small">Setup 1 WCS: zero X and Y here on the machine</text>
+  <!-- flip -->
+  <path d="M845,170 C885,215 885,305 845,350" class="sv-path" stroke="var(--cut)" marker-end="url(#ar2c)"/>
+  <text x="790" y="380" class="t-cut">flip end</text>
+  <text x="790" y="397" class="t-cut">over end</text>
+</svg>
+<figcaption><b>Figure 2.</b> Side A, top view. The two slots are the two holes of the hole mode, moved out to the edges: on the flip axis, so that side A and side B give them the same coordinates, and of different widths, so that a wrong flip fails.</figcaption>
+</figure>
+
+<table class="rules">
+  <tr><th>Rule for the side-A slots</th><th>Why</th></tr>
+  <tr><td>Two slots on the flip axis, one at each end, opening to the outside.</td><td>On the flip axis the side-A and side-B coordinates are the same. Far apart gives the best rotation.</td></tr>
+  <tr><td>Different widths, at least 0.1 in apart.</td><td>The widths tell the slots apart, so a board flipped the wrong way fails.</td></tr>
+  <tr><td>Cut with an end mill that moves inward from outside the stock to a round end.</td><td>The cutter never has to be above the stock. The centre of the round end is the slot's reference point: enter its X and Y in Virtual Dowel.</td></tr>
+  <tr><td>Depth from face A: as deep as the side-A tool allows, past mid-thickness.</td><td>The bay on side B must reach it.</td></tr>
+  <tr><td>Width and length at least as the <a href="#sizes">size calculator</a> says. Make the slot longer by how far your side-A zero may be off.</td><td>The probe needs room on a turned board and must touch the straight part of the walls.</td></tr>
+  <tr><td>Zero within about 0.1 in along the flip axis, or cut the key notch.</td><td>The rough fit takes each slot opening to be at the stock-box edge (<a href="#rough">section 8</a>).</td></tr>
+</table>
+
+<h2 id="sideB">4. Side B in Fusion: the bays</h2>
+<p>Set up Setup 2 as for the hole mode. Then add the bays: one above each slot, cut from face B. Put them in their own posted file (the bay file), so that Virtual Dowel can place it before the slots can be probed.</p>
+<table class="rules">
+  <tr><th>Rule for the bays</th><th>Why</th></tr>
+  <tr><td>Open to the outside edge.</td><td>The probe cannot go above the stock, so it must come in from the side. A closed pocket, round or not, cannot be reached.</td></tr>
+  <tr><td>Enter from outside the stock. No plunge or ramp into material.</td><td>Every plunge happens in the air.</td></tr>
+  <tr><td>Depth: 0.15 in into the top of the side-A slot.</td><td>The bay and the slot must meet.</td></tr>
+  <tr><td>Width and reach at least as the size calculator says, measured from the slot's round-end centre.</td><td>The probe body follows the ball. If the body is below the stock top while probing, the bay must fit it beside every wall touch and at the round end, plus 0.4 in for the rough fit.</td></tr>
+  <tr><td>Bays in waste only. Cutter cutting length at least the bay depth + 0.1 in.</td><td>The bay file has no part geometry.</td></tr>
+</table>
+
+<h2 id="sizes">5. Sizes</h2>
+<p>The size calculator gives the minimum slot and bay sizes and the park height for your probe and stock. It reads nothing from your files. In a command window in the VirtualDowel folder:</p>
+<pre><code>py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 ^
+   --thick 3 --slot-depth 1.75 --widths 0.625,0.75 --slot-length 1.25 ^
+   --bay-width 2.3 --bay-reach 1.2</code></pre>
+<p>It prints <b>OK</b>, or <b>NOT OK</b> with the problems. Add <code>--mm</code> to give every value in millimetres. The inputs:</p>
+<table class="rules">
+  <tr><th>Input</th><th>Meaning</th><th>Example</th></tr>
+  <tr><td><code>--ball</code>, <code>--stem</code>, <code>--body</code></td><td>Diameters of the probe ball, the stylus stem and the probe body.</td><td>0.125, 0.08, 0.8</td></tr>
+  <tr><td><code>--free</code></td><td>From the ball centre to where the probe body gets wider.</td><td>1.0</td></tr>
+  <tr><td><code>--length</code></td><td>From the ball centre to the bottom of the collet nut.</td><td>3.0</td></tr>
+  <tr><td><code>--thick</code>, <code>--slot-depth</code></td><td>Stock thickness; side-A slot depth from face A.</td><td>3.0, 1.75</td></tr>
+  <tr><td><code>--widths</code>, <code>--slot-length</code></td><td>Planned slot widths; edge to round-end centre.</td><td>0.625,0.75; 1.25</td></tr>
+  <tr><td><code>--bay-width</code>, <code>--bay-reach</code></td><td>Planned bay, to check (optional).</td><td>2.3; 1.2</td></tr>
+  <tr><td><code>--edge-tol</code>, <code>--overlap</code>, <code>--search</code>, <code>--max-rot</code></td><td>Optional: real edge vs stock box (0.15), bay into slot (0.15), end-search length (2.5), board rotation (5 deg).</td><td>defaults</td></tr>
+</table>
+
+<h3>The rules it applies</h3>
+<p>Here &rho; is the ball centre's travel across the widest slot: (widest slot width &minus; ball diameter) / 2. <i>Clearance radius</i> is the body radius when the body is below the stock top while probing, else the stem radius.</p>
+<table class="rules">
+  <tr><th>Size</th><th>Rule</th><th>Example</th></tr>
+  <tr><td>Bay floor</td><td>side-A slot depth &minus; overlap</td><td>1.600</td></tr>
+  <tr><td>Park height (ball centre)</td><td>below the bay floor by the ball radius + 0.05; above the spoilboard; probe body bottom above the bay floor; collet nut above the stock top</td><td>0.650 to 1.488</td></tr>
+  <tr><td>Bay width</td><td>2 &times; (&rho; + clearance radius + 0.4)</td><td>2.225</td></tr>
+  <tr><td>Bay reach</td><td>&rho; + clearance radius + 0.4, past the round-end centre</td><td>1.113</td></tr>
+  <tr><td>Bay depth</td><td>stock thickness &minus; bay floor</td><td>1.400</td></tr>
+  <tr><td>Slot width</td><td>ball + 2 &times; (sideways drift of the end search on a 5&deg; board + 0.1)</td><td>&ge; 0.593</td></tr>
+  <tr><td>Slot length</td><td>round-end centre at least 0.75 in inside the real edge, plus the edge tolerance</td><td>&ge; 0.900</td></tr>
+  <tr><td>Slot widths</td><td>differ by at least 0.1</td><td>0.625, 0.75</td></tr>
+  <tr><td>End-search length</td><td>longest slot + edge tolerance + &rho; (the routine's setting <code>&amp;vd_slen</code>)</td><td>1.713 of 2.5</td></tr>
+</table>
+<p>The simulator probes the minimum bay of this example without a collision, with a 0.2 in rough-fit error and at both ends of the park height band. If your probe body stays above the stock top while probing, the bays only need room for the stylus stem and can be much narrower.</p>
+
+<h2 id="machine">6. At the machine</h2>
+<aside class="note"><p>Steps 4 and 8 use the Virtual Dowel window. Its half-slot steps are not built yet; this is the planned flow.</p></aside>
+<ol class="steps">
+  <li><span class="where">Side A</span>Clamp the stock. Zero X and Y at the corner of the Setup 1 WCS, within about 0.1 in along the flip axis. Zero Z. Run side A, slots included.</li>
+  <li><span class="where">Flip</span>Flip the board over the flip axis and clamp it anywhere, turned up to 5&deg;. Keep the slot openings and the space for the bays free of clamps.</li>
+  <li><span class="where">Bay cutter</span>Fit the bay cutter. Do not zero X or Y on side B, now or later.</li>
+  <li class="machine"><span class="where">Rough locate</span>Type <code>C80</code>. Choose half slots, the side-B files, the bay file, the slots and the stock box, then start the rough locate. For each slot, in the order the window shows, jog the bit tip over the slot opening on the edge face and confirm. The key notch comes last, if you cut one.</li>
+  <li><span class="where">Bay cut</span>The window places the bay file as <code>&lt;bay file&gt;_VDROUGH.sbp</code>. Look at it in Preview. Zero Z, then run it.</li>
+  <li><span class="where">Clean</span>Vacuum the slots and bays. A chip on a wall moves a touch.</li>
+  <li><span class="where">Probe</span>Fit the probe and plug in its cable.</li>
+  <li class="machine"><span class="where">Probe the slots</span>Type <code>C80</code> and start probing. For each slot, jog the probe ball to about 0.3 in outside the opening, in line with the slot, inside the park height band, and confirm. The routine does the rest (<a href="#routine">section 7</a>).</li>
+  <li><span class="where">Align</span>The window aligns the side-B files: PASS writes <code>&lt;job&gt;_VD.sbp</code>.</li>
+  <li><span class="where">Cut side B</span>Fit each cutter, zero Z only, and run each <code>_VD.sbp</code>.</li>
+</ol>
+
+<h2 id="routine">7. What the probe does at each slot</h2>
+<p>Every move below the stock top is guarded: the probe input stops it. Each error stop backs the probe out of the slot the way it came in.</p>
+
+<figure>
+<svg viewBox="0 0 900 460" role="img" aria-labelledby="f3t f3d">
+  <title id="f3t">One slot and its bay, top view, with the probe's moves</title>
+  <desc id="f3d">The probe ball is parked outside the slot opening. It moves a little way in, finds the two slot walls and centres on them, searches along the slot for the round end, backs off onto the straight part, touches wall, wall and end on each pass, and backs out. The dashed circles show the probe body, which stays inside the bay.</desc>
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--probe)" stroke-width="1.6"/></marker>
+  </defs>
+  <rect x="230" y="20" width="650" height="420" class="sv-woodfill"/>
+  <line x1="230" y1="20" x2="230" y2="440" class="sv-ink"/>
+  <text x="236" y="36" class="t-small">stock edge</text>
+  <rect x="230" y="63.1" width="354.4" height="333.8" class="sv-cut"/>
+  <path d="M230,183.1 H417.5 A46.9,46.9 0 0 1 417.5,276.9 H230" class="sv-cut2"/>
+  <line x1="150" y1="230" x2="560" y2="230" class="sv-center"/>
+  <text x="596" y="84" class="t-cut">bay, from your Fusion file</text>
+  <text x="596" y="101" class="t-small">wide enough for the probe body</text>
+  <text x="262" y="330" class="t-cut">side-A slot, below the bay floor</text>
+  <line x1="300" y1="316" x2="320" y2="282" class="sv-thin"/>
+  <!-- probe body outlines -->
+  <circle cx="185" cy="242" r="60" class="sv-ghost"/>
+  <circle cx="455" cy="230" r="60" class="sv-ghost"/>
+  <line x1="516" y1="236" x2="604" y2="252" class="sv-thin"/>
+  <text x="608" y="252" class="t-probe">probe body at its farthest point,</text>
+  <text x="608" y="269" class="t-probe">still inside the bay</text>
+  <!-- moves -->
+  <circle cx="185" cy="242" r="9.4" class="sv-probefill"/>
+  <line x1="194" y1="242" x2="266" y2="242" class="sv-path" marker-end="url(#ar3)"/>
+  <line x1="275" y1="233" x2="275" y2="194" class="sv-path" marker-end="url(#ar3)"/>
+  <line x1="275" y1="251" x2="275" y2="266" class="sv-path" marker-end="url(#ar3)"/>
+  <line x1="284" y1="230" x2="446" y2="230" class="sv-path" marker-end="url(#ar3)"/>
+  <path d="M448,222 C432,206 412,206 398,214" class="sv-path" marker-end="url(#ar3)"/>
+  <line x1="396" y1="224" x2="396" y2="194" class="sv-path" marker-end="url(#ar3)" stroke-dasharray="4 3"/>
+  <line x1="396" y1="236" x2="396" y2="266" class="sv-path" marker-end="url(#ar3)" stroke-dasharray="4 3"/>
+  <circle cx="455" cy="230" r="9.4" class="sv-ghost"/>
+  <!-- numbered markers: a real sequence -->
+  <g><circle cx="230" cy="262" r="10" class="num"/><text x="230" y="262" class="t-num">1</text></g>
+  <g><circle cx="300" cy="176" r="10" class="num"/><text x="300" y="176" class="t-num">2</text></g>
+  <g><circle cx="350" cy="250" r="10" class="num"/><text x="350" y="250" class="t-num">3</text></g>
+  <g><circle cx="423" cy="196" r="10" class="num"/><text x="423" y="196" class="t-num">4</text></g>
+  <g><circle cx="376" cy="176" r="10" class="num"/><text x="376" y="176" class="t-num">5</text></g>
+  <text x="30" y="300" class="t-probe">park: 0.3 outside,</text>
+  <text x="30" y="317" class="t-probe">in line with the slot</text>
+</svg>
+<figcaption><b>Figure 3.</b> One slot and its bay on side B, top view, to the scale of the worked example. The numbers match the steps below.</figcaption>
+</figure>
+
+<ol class="steps">
+  <li>Move 0.6 in into the opening. Nothing may be touched. A touch means the slot is too short or the park is off-line.</li>
+  <li>Look for the two slot walls across the opening and centre on them. No walls means the ball is too high, in the bay, or not at the opening. This check comes first, so that the probe body can never reach the end of the bay.</li>
+  <li>Search along the slot for the round end. It must be at least the back-off distance + 0.1 in further in, or the slot is too short.</li>
+  <li>Back off onto the straight part of the slot.</li>
+  <li>One coarse and then the fine passes: wall, wall, end. Then back out to the park point.</li>
+</ol>
+<p>With spin-180 on, the routine asks you to turn the spindle by hand after each slot and probes it again. That cancels stylus runout.</p>
+
+<h2 id="rough">8. How the bay file is placed</h2>
+<p>The bays must be cut before the slots can be probed, so the bay file is placed by a rough fit. Each slot opening shows on the edge face, and it is where the slot axis meets the stock-box edge. Two openings jogged by eye give the rotation and both shifts.</p>
+
+<figure>
+<svg viewBox="0 0 900 300" role="img" aria-labelledby="f4t f4d">
+  <title id="f4t">Rough locate on side B</title>
+  <desc id="f4d">The flipped board, turned a few degrees. The bit tip is jogged over each of the two slot openings. From these two points Virtual Dowel places the bay file; the bays land within about 0.2 inches of the slots.</desc>
+  <g transform="rotate(-3 450 150)">
+    <rect x="140" y="40" width="620" height="220" class="sv-sheet"/>
+    <line x1="100" y1="150" x2="800" y2="150" class="sv-center"/>
+    <path d="M140,144 H166 A6,6 0 0 1 166,156 H140" class="sv-cut2"/>
+    <path d="M760,143 H734 A7,7 0 0 0 734,157 H760" class="sv-cut2"/>
+    <rect x="140" y="118" width="62" height="64" class="sv-cut" stroke-dasharray="5 4"/>
+    <rect x="698" y="114" width="62" height="72" class="sv-cut" stroke-dasharray="5 4"/>
+    <g class="sv-path"><circle cx="140" cy="150" r="13" fill="none"/><line x1="122" y1="150" x2="158" y2="150"/><line x1="140" y1="132" x2="140" y2="168"/></g>
+    <g class="sv-path"><circle cx="760" cy="150" r="13" fill="none"/><line x1="742" y1="150" x2="778" y2="150"/><line x1="760" y1="132" x2="760" y2="168"/></g>
+  </g>
+  <text x="36" y="120" class="t-probe">jog 1</text>
+  <text x="36" y="137" class="t-small">over slot 1's</text>
+  <text x="36" y="152" class="t-small">opening</text>
+  <text x="786" y="122" class="t-probe">jog 2</text>
+  <text x="250" y="292" class="t-small">dashed: where the rough fit puts your bays, within about 0.2 in of the slots</text>
+</svg>
+<figcaption><b>Figure 4.</b> Rough locate on side B, with the bay cutter in. Only the bay file ever gets this rough fit. The side-B job files get the exact fit from probing.</figcaption>
+</figure>
+
+<ul>
+  <li><b>Accuracy:</b> in the simulator, with a 0.1 in jog error and a board turned 5&deg;, the bays land within 0.24 in when the real edge is within 0.15 in of the stock box. That includes your side-A zero error along the flip axis.</li>
+  <li><b>Irregular stock:</b> where the real edge is not near the stock box, an opening only shows where the slot axis is, not where along it the slot is. Cut the key notch in an edge at right angles to the flip axis and jog to it last; it gives the missing position. It gets no bay and is never probed.</li>
+  <li><b>Never a part file:</b> the output is named <code>_VDROUGH</code>, a file with cuts more than 3 in from the slots is refused, and the probing that follows deletes the rough file.</li>
+</ul>
+
+<h2 id="checks">9. Checks</h2>
+<p>The checks protect the machine and the measurement. None of them reads your slot or bay sizes from your files.</p>
+<table class="rules">
+  <tr><th>Check</th><th>Where</th><th>On failure</th></tr>
+  <tr><td>Nothing touched at the opening; slot walls present; slot long enough</td><td>probing routine</td><td>stops, backs out</td></tr>
+  <tr><td>The bay file's cuts are all within 3 in of a slot (<code>bay_reach</code>)</td><td>rough fit</td><td>bay file refused</td></tr>
+  <tr><td>Jogged openings as far apart as the design (two openings only)</td><td>rough fit</td><td>jog again, or use the key notch</td></tr>
+  <tr><td>Each slot opens toward the stock-box edge the design says</td><td>alignment</td><td>FAIL</td></tr>
+  <tr><td>Wall touches on the straight part of the slot</td><td>alignment</td><td>FAIL</td></tr>
+  <tr><td>Widths match the design in some order; spacing; rotation up to 5&deg;</td><td>alignment (as for holes)</td><td>FAIL</td></tr>
+  <tr><td>X/Y zero, units and FP offset unchanged since probing</td><td>each <code>_VD</code> and <code>_VDROUGH</code> file</td><td>the file stops</td></tr>
+</table>
+
+<h2 id="messages">10. Messages and what to do</h2>
+<table class="rules">
+  <tr><th>Message</th><th>Cause</th><th>Do this</th></tr>
+  <tr><td>The probe touched something right at the slot opening.</td><td>Parked off-line, or the slot is very short.</td><td>Park in line with the slot, about 0.3 in out from the edge.</td></tr>
+  <tr><td>No slot walls at the opening.</td><td>The ball is in the bay (too high), or not at the opening.</td><td>Park lower, inside the park height band.</td></tr>
+  <tr><td>The slot end is too close to its opening.</td><td>The round end is less than about 0.75 in inside the real edge.</td><td>Cut longer slots on the next job.</td></tr>
+  <tr><td>No contact within the search distance.</td><td>The slot is longer than the end-search length, or the probe did not trigger.</td><td>Check the probe; raise <code>&amp;vd_slen</code> as the size calculator says.</td></tr>
+  <tr><td>This does not look like the bay file.</td><td>A file with cuts away from the slots was chosen as the bay file.</td><td>Choose the bay file.</td></tr>
+  <tr><td>Slot <i>n</i> was probed as opening toward ...</td><td>The slot coordinates or the stock box do not match the side the slot opens to.</td><td>Check the slot X, Y and the stock box (side-B coordinates).</td></tr>
+</table>
+
+<h2 id="through">11. Through slots</h2>
+<p>If you have a bit as long as the stock is thick, but not the Z travel to get it above the stock, cut the slots through the full thickness from outside. No bays and no rough locate: on side B, go straight to probing (step 7 of section 6). The retract and linking moves of that bit must stay low and outside the stock.</p>
+
+<h2 id="accuracy">12. Accuracy</h2>
+<ul>
+  <li>Across a slot, the two wall touches go in opposite directions, so ball size, trigger travel, stop latency and backlash cancel, as in a hole.</li>
+  <li>Along a slot, the end touch goes one way only. A push past contact that is the same on both axes cancels against the wall pair. What remains, for example backlash, has the opposite sign at the two opposite slots, so it cancels in the position and shows only as a spacing error in the report.</li>
+  <li>Stylus runout shifts every touch the same way: use spin-180, or keep runout under 0.0005 in.</li>
+  <li>Expected registration: about that of the hole mode, 0.001 to 0.002 in. This is an estimate from the simulator, not yet measured on the machine.</li>
+</ul>
+
+<footer>
+  <p>Virtual Dowel. Copyright &copy; 2026 Nikolai Kozak. All rights reserved. Proprietary, see LICENSE.txt. ShopBot and OpenSBP are trademarks of ShopBot Tools, Inc.; Fusion is a trademark of Autodesk, Inc. Virtual Dowel is not affiliated with either company.</p>
+</footer>
+</main>
+</body>
+</html>

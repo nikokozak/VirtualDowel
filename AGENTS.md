@@ -60,6 +60,8 @@ vd_selftest.sbp  offline check of SB3 features (Preview, no motion). The header 
                  OPEN lines by number (19, 22, 27). Keep them on those lines.
 vd_align.bat     double-click launcher; logs to vd_launch.log. SB3 never uses it.
 vd_install.bat   runs vd_align.py --install
+docs/guide.html  operator guide for thick stock (half slots): Fusion setup, sizes, probing; offline, no external files
+docs/thick-stock-plan.md  design plan and status of the thick-stock modes
 tests/test_vd.py   unittest suite
 tests/sbp_vm.py    OpenSBP interpreter plus a simulated ShopBot and probe
 tests/sim_sbp.py   independent toolpath sampler that verifies the rewriter

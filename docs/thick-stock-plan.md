@@ -289,7 +289,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 | 2 (done) | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
 | 3 (done) | Rough locate run in `vd_probe.sbp` (`&vd_rough`); `prepare_rough`; optional key notch (`fit_lines`); SHELL word `rough` (until the window step exists, it writes the report and the log) | VM run of the rough locate; three-line fit from noisy jogs (as in `docs/rough_fit_sim.py`); lint |
 | 4 | Window: mode switch (holes, half slots, through slots), slot entry, probe sizes, size calculator, steps, drawing, Guide button | window tests; calculator unit tests |
-| 5 | README operator section, `docs/guide.html`, machine tests | below |
+| 5 | README operator section, machine tests (`docs/guide.html` drafted 2026-10-04; update it when the window steps exist) | below |
 | 6 | Edge mode | section 10 |
 
 **Machine tests:**
