@@ -2,39 +2,105 @@
 
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
-Status: proposal, revision 3, 2026-10-04. No code for this is written yet. Nikolai must choose the direction (section 2) before work starts. Revision 2 adds Nikolai's constraints: the probe cannot reach the top of thick stock, Z is set by the operator, and the edges are machined on the CNC. Revision 3 corrects the slot depth: edge slots must go through the full thickness (Nikolai found the error).
+Status: proposal, revision 4, 2026-10-04. No code for this is written yet.
+
+History: revision 2 added the probe and Z constraints and CNC-machined edges. Revision 3 corrected the slot depth (a part-depth slot has a ceiling on side B; Nikolai found the error). Revision 4 follows Nikolai's direction: assume no full-length bit, focus on the half-slot technique, keep the through slots and the edge mode as further options.
 
 ## 1. Problem and constraints
 
-The hole mode needs a through-hole. To cut it, the cutter (as long as the stock is thick) must start above the stock. That needs about 2 to 2.5 times the stock thickness T in Z travel. Thick stock does not fit.
+The hole mode needs a through-hole, and the cutter for it must start above the stock. That needs about 2 to 2.5 times the stock thickness T in Z travel. Thick stock does not fit.
 
-Constraints from Nikolai:
+Constraints:
 
-- The probe is too long to go above the top of thick stock. The probe ball is always below the top surface. So the probe can never cross over the stock; it travels around the outside.
-- A Z touch-off with the probe is possible but not exact (vertical pretravel). Z can be left to the operator.
-- Both faces are faced. The edges are machined on the same CNC, two opposite edges per setup, clamped on the other two. With a long enough bit each edge is cut in one pass. Otherwise each edge is cut in two halves (one from each face), and the halves can be slightly offset.
-- Some stock is a slight rhomboid (expected, because the two edge pairs are cut in two setups).
+- **No full-length bit.** Each side can only cut a little past mid-thickness, as in any flip-milling job. (A full-length bit with too little Z travel to go over the stock is the second case; section 9.)
+- **The probe cannot go above the top of thick stock.** It always travels around the outside of the stock. It can only get into a feature from the side.
+- Z is set by the operator. A Z touch-off with the probe is possible but not exact.
+- Stock can be large and irregular, so the method must not need machined edges.
 
-## 2. Two ways to do it - choose one to build first
+## 2. Modes and build order
 
-**A. Edge mode (Nikolai's proposal).** Probe two edges at each of the four corners, make a line through each edge, intersect the lines to get the corners, pick one corner as the job zero and one edge as the X direction. Do it on both sides with the same physical corner and edge. Uses no waste; the stock edges are the reference. Sections 3-9.
+1. **Half-slot mode (build first).** Side A cuts two U-shaped slots in the edges, from face A to past mid-thickness. On side B, Virtual Dowel writes a short cut that opens a large bay above each slot, from face B. Then the probe goes in from the side and probes the slots like holes. Sections 3-8.
+2. **Through-slot mode (comes almost free).** The same slots cut through the full thickness from outside with a full-length bit. No bay cut. Section 9.
+3. **Edge mode (later).** No features in the waste; uses the four machined edges. Needs every edge machined, so it does not suit irregular stock. Section 10.
 
-**B. Edge-slot mode (alternative).** Side A cuts two short U-shaped slots through the full thickness, open to the outside, at the two ends of the flip axis, with different widths. These are "half-holes" at the edges. The cutter and the probe both come in from outside the stock, so neither has to be above it. On side B the routine probes the slots as it probes holes now. **It needs a bit at least as long as the stock is thick** (the same bit as one-pass edges). Section 10.
+## 3. Half-slot mode: the method
 
-| | A. Edges | B. Edge slots |
+**Side A** cuts two slots, like the two holes of the hole mode:
+
+- On the flip axis, at opposite ends (for an end-over-end flip: one in the left edge, one in the right edge). On the flip axis, the side-A and side-B coordinates are the same.
+- Different widths (for example 0.5 and 0.625 in), so a wrong flip fails, as with holes.
+- Each slot is cut with an end mill that moves inward from outside the stock, to a round end. The round end must be at least 0.75 in inside the real stock edge. The reference point is the centre of the round end.
+- Depth from face A: as deep as the side-A tool allows, past mid-thickness (D_A).
+
+**Side B** (after the flip):
+
+1. **Rough locate (cutter in).** For each slot, the operator jogs the bit tip over the slot opening, which shows on the edge face. Within 0.3 in is enough (section 5).
+2. **Bay cut (cutter in).** Virtual Dowel writes a short cut file: a bay above each slot, open to the outside edge, from face B down to just below the top of the side-A slot. The operator previews it, zeroes Z, and runs it.
+3. **Probe (probe in).** The operator parks the probe ball outside each bay at the probing height. The routine moves in along the slot (guarded), touches the slot end, then both side walls, then the end again (fine passes).
+4. **Align and cut (cutter in)**, as in the hole mode.
+
+Compared with the hole mode, side B has one more tool change (cutter, probe, cutter) and one short cut.
+
+## 4. Why it works without a full-length bit
+
+On side B, face A is on the spoilboard. The side-A slot goes from the spoilboard up to height D_A. The bay goes from the top (T) down to D_A minus a small overlap. Together they open a path from the top down into the slot. Side A cuts D_A and side B cuts T - D_A + overlap: each is about half the thickness, the same depths the flip-milling job itself needs. **So the half-slot mode works whenever the flip-milling job works.**
+
+The probe does not have to reach down from above the stock. Its ball enters the slot from the side, and its body moves along inside the bay. The bay must be wider than the probe body. The only reach limit is that the collet nut stays above the stock top: the ball must be at least (T - probe length + clearance) above the spoilboard, which a long probe easily meets.
+
+## 5. Why a hand jog and an unknown rotation are enough
+
+The bay is much larger than the slot:
+
+- width = the larger of the probe body diameter and the slot width, plus 2 x 0.3 in;
+- length = from outside the jogged opening to the full slot length + 0.3 in inward (this covers irregular stock, where the opening is wherever the real edge is);
+- depth = to 0.15 in below the top of the side-A slot.
+
+So a jog error under 0.3 in is harmless. The rotation comes from the two jogged openings (both on the flip axis, far apart), and even an unknown 5 deg turns a 1.5 in bay by only 0.13 in. No reprobe is needed.
+
+The bay must be open to the outside edge. A closed pocket, round or not, does not work, because the probe cannot come down into it from above. An open bay also means that every plunge happens in the air outside the stock.
+
+## 6. Accuracy (expected about the same as the hole mode)
+
+- **Across the slot** (both walls, opposite directions): ball size, pretravel, latency and backlash cancel exactly, as in a hole.
+- **Along the slot** (the end touch, one direction only): half the measured width bias corrects the ball size and pretravel. What remains, for example backlash, has the opposite sign at the two opposite slots. So it cancels in the translation and shows only as a spacing error, which the existing spacing check reports.
+- **Rotation** comes from the across-slot coordinates of the two slots (two-sided) over their full spacing: the same as two holes that far apart.
+- **Stylus runout** shifts every touch the same way, as in the hole mode. The existing spin-180 option cancels it (the spindle can be turned with the ball in the slot).
+- **Tram tilt** of the slot walls: as in the hole mode, but smaller, because the probe touches near face A, where side A started the cut.
+
+**Reuse.** In the code, a half-slot is a hole with one open side. The routine skips the touch toward the open side. The centre along the slot is the end touch minus half the measured width. Size matching, the symmetric-layout and mirror checks, the rigid fit, the spacing check, the rewriter, the runtime checks and the stale-output protection are the hole-mode code, unchanged.
+
+## 7. The bay cut file
+
+Nikolai's condition: the cut must be safe and smooth, use the ShopBot post's conventions, and specify its cutter.
+
+- **Cutter (required, checked by the window):** an upcut spiral or straight end mill, 3/8 or 1/2 in diameter, with a cutting length of at least the bay depth + 0.1 in, and no reduced neck. It does not need to be centre-cutting, because it never plunges into material. The window has its own settings for it: diameter, cutting length, RPM, feed, step-down. The defaults are conservative and each value has a range check.
+- **Toolpath:** plunge outside the stock in the air; at each step-down, straight strokes from outside inward along the bay and back out; step-over at most half the diameter. No plunge or ramp into material.
+- **Commands:** the same set as Nikolai's ShopBot posts: `SA`, `MS`/`JS`, `TR`, `C6`/`C7` (spindle on/off), `JZ`, `J2`, `M3`, whole-second `PAUSE`, and the posts' unit check. Plus the Virtual Dowel runtime header (units, X/Y zero, FP offset/scale).
+- **Z:** Z zero at the spoilboard (Nikolai's flip convention). Then the bay floor is at a fixed height, D_A - 0.15 in, whatever the thickness. The safe height comes from the thickness.
+- **Checks before cutting:** the window draws the bays over the side-B toolpaths. The operator runs the file in Preview first. Tests check that every plunge is outside the stock, no move goes below the floor or outside the bay, and the file passes the OpenSBP lint and runs in the simulator.
+- **Alternative:** Nikolai designs the bays as a Setup 2 operation in Fusion, and Virtual Dowel only moves that file with the rough fit. This uses his own post and simulation, at the cost of CAM work for each job.
+
+## 8. Half-slot mode: risks
+
+| Risk | Effect | Control |
 |---|---|---|
-| Expected A/B registration | 0.002-0.004 in with good edges (estimate) | about the same as the hole mode, 0.001-0.002 in (estimate) |
-| Probing on side A | 4 corners | none (side A only cuts the slots) |
-| Probing on side B | 4 corners | 2 slots |
-| Wrong flip direction detected | no (operator mark only) | yes, by the slot widths, as with holes |
-| Depends on edge quality, edge tilt, two-half edges | yes | no |
-| Needs waste at both ends of the flip axis | no | yes |
-| Needs a bit as long as the stock is thick | no (two-half edges work, with limits) | yes |
-| New code | new measurement, fit, window picker, simulator model | new touch pattern only; the rest of the hole mode is reused |
+| Chips from the bay cut fall into the slot | Bad touches | Vacuum the slots before probing (the window says so). The repeat and width checks catch most bad touches. |
+| Probe body wider than the bay | Collision | Probe body diameter is a machine setting; bay width is computed from it. All moves at probing height are guarded. |
+| Round end less than 0.75 in inside the real edge (irregular stock) | No room for the wall touches | Rule in the README and the window. The routine stops with a message if the end comes too soon. |
+| Wrong flip | Job turned 180 deg | Different slot widths, as with holes: the fit fails. |
+| Bay overlaps the part | Damaged part | Bays only in waste; the window draws them over the side-B toolpaths and warns on overlap. |
+| X/Y zero changed between rough locate, bay cut and probing | Bays in the wrong place | The bay file has the runtime zero check; the precise probing measures again anyway. |
+| FP of the bay file from inside a running file is not confirmed on SB3 | Extra step | Use C80 for each step (the window opens at the current step), as now. |
 
-**Recommendation:** if a full-length bit is available, build B first for parts with waste at both ends of the flip axis: it is more accurate, less work at the machine, and reuses the proven hole code. Without a full-length bit, build A.
+## 9. Through-slot mode (full-length bit, too little Z travel)
 
-## 3. Edge mode: the method
+The same slots cut through the full thickness from outside. On side B there is no rough locate and no bay cut: the operator parks the probe outside each slot opening and the routine probes it. Same code as the half-slot mode, without steps 1 and 2. CAM note: with a full-length bit, the retract and linking moves must stay low and outside the stock.
+
+## 10. Edge mode (built after the slot modes)
+
+Kept from revisions 1-3. It uses no waste features, but every edge must be machined, and side A must be probed too.
+
+### Method
 
 At each corner, probe the two edges near the corner. Each edge then has two points, one near each end. A line goes through the two points of each edge, and the corners are where adjacent lines meet. The operator picks the corner where the Fusion WCS is and the edge that is its X axis. On side B, the window selects the same physical corner and edge from the flip type.
 
@@ -48,9 +114,9 @@ If side B uses a different corner, the real stock size enters the result. So the
 
 The result is a rotation and a translation, the same as the hole mode. The OpenSBP rewriter, the runtime checks, the outputs and the stale-output protection stay as they are.
 
-## 4. Edge mode: errors (checked with a simulation)
+### Errors (checked with a simulation)
 
-Simulation: stock 30 x 20 x 3 in, side A turned 1.3 deg, side B turned -2.1 deg after an end-over-end flip. Worst offset between matching side-A and side-B points. Script: `docs/edge_sim.py` (it becomes a unit test in phase 1).
+Simulation: stock 30 x 20 x 3 in, side A turned 1.3 deg, side B turned -2.1 deg after an end-over-end flip. Worst offset between matching side-A and side-B points. Script: `docs/edge_sim.py` (it becomes a unit test when the edge mode is built).
 
 | Case | A/B offset |
 |---|---|
@@ -92,7 +158,7 @@ The window computes the two heights from T, s and the band, and refuses a height
 - The parallelism of opposite edges is a good check of the measurement (a bad touch shows as a pair that is not parallel).
 - A parallelogram looks the same after either flip, so the geometry cannot detect a wrong flip. The corner mark is the only control.
 
-## 5. Edge mode: risks
+### Risks
 
 | Risk | Effect | Control |
 |---|---|---|
@@ -105,7 +171,7 @@ The window computes the two heights from T, s and the band, and refuses a height
 | Corner far from 90 deg | Part may not fit on the stock | Warn above a limit (for example 0.5 deg), FAIL above a larger one (for example 3 deg); both in `vd_settings.json`. |
 | Wrong corner picked for the Fusion WCS | Job placed off the stock | The job's toolpaths must fall inside the measured outline (same idea as the stock-box coverage check). |
 
-## 6. Edge mode: operator procedure
+### Operator procedure
 
 Side A:
 
@@ -139,13 +205,13 @@ Motion at one corner (front-left shown; the other corners are mirror images). Ev
 
 Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search distance 0.8 in. 4 corners x 2 stations x (1 + N) touches. About 4-6 minutes per side.
 
-## 7. Fusion 360 rule (edge mode)
+### Fusion 360 rule
 
 - Setup 1: WCS origin at the stock-box corner that is the physical reference corner C; X along the reference edge E.
 - Setup 2: WCS origin at the same physical corner. After an end-over-end flip, a front-left C is at the back-left: stock box `0, -H, W, 0`, Y and Z inverted (Nikolai's earlier back-left habit).
 - Stock box: the nominal size.
 
-## 8. Edge mode: design decisions
+### Design decisions
 
 1. **One routine.** Add the mode to `vd_probe.sbp` (`&vd_kind`) instead of a new file. It reuses the proven setup, finger test, input detection, `vd_touch_rec`, `vd_touch`, `vd_onhit`, error exits and the end SHELL. The hole path does not change. GOSUB depth stays at 5. New subroutines: corner, station, guarded move.
 2. **Data format.** A new header tag for edge data, so the hole format stays the same byte for byte. `T` records keep their format (the `hole` field is the corner number; axis and sign give the edge; `z` gives the probing height).
@@ -154,73 +220,46 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 5. **Window.** *Locate with* switch; edge settings (side, flip type, thickness, step clearance; band limits as machine settings). The Align screen gets a tkinter Canvas: measured outline, four clickable corners, the X-edge choice, toolpath extents, side-A comparison. Standard library only.
 6. **Simulator.** `tests/sbp_vm.py` gets a stock-block model (convex outline, optional edge tilt and two-half step). The routine runs end to end in it, with its error paths.
 
-## 9. Phases
 
-Each phase ends with all tests passing and a short report. Nothing is called "works on the machine" until Nikolai confirms it.
+## 11. Half-slot mode: design decisions and phases
+
+**Code:**
+
+1. **A half-slot is a hole with an open side.** New per-hole field "open side" (none, +X, -X, +Y, -Y) in the window, the sidecar and the CLI; the window sets it from the nearest stock-box edge. The routine gets one direction variable per hole and skips the touch toward the open side. `T` records keep their format; a new record names the open side, so old data files still parse.
+2. **Rough locate** is a short run mode of `vd_probe.sbp`: keypad at each slot opening, record `%(1)`/`%(2)` and `%(6)`/`%(7)`, write the data, start the window.
+3. **Bay cut file** is written by a new function in `vd_align.py`, with the existing runtime header from `build_output`.
+4. **Window steps.** The session records the step (rough locate, bay cut, probe, align). C80 opens the window at the current step, and each Start writes `vd_run.sbp` for that step, as now.
+5. **Simulator.** `tests/sbp_vm.py` gets stock with half-depth slots and bays, and a collision check for the stylus and the probe body, not only the ball. That check would have caught the revision-2 slot error.
+
+**Phases** (each ends with all tests passing; nothing is "works on the machine" until Nikolai confirms it):
 
 | Phase | Content | Check |
 |---|---|---|
-| 0 | Fixes from the v2.0 review (section 12). Items 1-4 done in v2.0.1; the others wait for a decision. | existing tests plus a new test for each fix |
-| 1 | Python: parser, fit, checks, shared write path, CLI (for the chosen mode) | unit tests with synthetic touches; the side-A -> flip -> side-B registration test |
-| 2 | Routine in `vd_probe.sbp`; SIM (dry run); VM model | VM end-to-end runs: square and rhomboid stock, rotated board, mm machine, spin-180, clamp in the path, no contact; static lint tests |
-| 3 | Window | window tests (with Tk) |
-| 4 | README operator section, troubleshooting, machine test stages | machine tests below |
-| 5 | Only if the data shows a need: automatic travel between corners; whole-outline fit against the side-A record | decided from the phase-4 data |
+| 0 | v2.0 review fixes (section 13). Items 1-4 done in v2.0.1; the others wait for a decision. | a test per fix |
+| 1 | Python: half-slot design entry, open-side centre calculation, width correction for a turned slot | synthetic touches; side-A -> flip -> side-B registration test |
+| 2 | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
+| 3 | Rough locate run, bay cut file, cutter settings | plunges outside the stock, depth and bay bounds, lint, VM run, independent toolpath check |
+| 4 | Window: mode switch (holes, half slots, through slots), slot entry, cutter settings, steps, bay drawing | window tests |
+| 5 | README operator section and machine tests | below |
+| 6 | Edge mode | section 10 |
 
-Machine tests (phase 4):
+**Machine tests:**
 
-- **M0** Preview dry run (typed positions) and window round trip.
-- **M1** Measure the probe band: ball height above the spoilboard with Z at the top of its travel; free stylus length.
-- **M2** Repeatability: probe the same block (or slots) three times without moving it. Scatter should be under 0.002 in.
-- **M3** New mode against the hole mode on a thin board: side A cuts two holes (and slots, for mode B); on side B, align with both. The difference is the error of the new mode, with the hole mode as the reference. No side-B cut needed.
+- **M0** Preview dry run of every step (typed positions).
+- **M1** Probe dimensions: body diameter, ball and stem diameters, nose-to-ball length, ball height above the spoilboard at the top of Z travel.
+- **M2** Bay file: Preview, then an air cut (Z zero raised 2 in), then a cut in scrap.
+- **M3** Half slots against holes on a thin board: side A cuts two holes and two half-slots; on side B, align with both. The difference is the half-slot error. No side-B cut of the part needed.
 - **M4** Thick flip test: a feature cut half from each side; measure the step.
 
-## 10. Edge-slot mode (alternative B)
+## 12. Questions for Nikolai
 
-**Idea.** A reference hole whose centre is at the stock edge becomes a slot that opens to the outside. A cutter can cut it from outside the stock, the same way as a one-pass edge, so it never has to be above the stock. The probe enters it from outside, at its working height.
+1. **Probe dimensions:** body diameter, ball and stem diameters, length from the collet nut to the ball, and the ball height above the spoilboard with Z at the top of its travel.
+2. **Bay cutter:** which end mill (diameter, cutting length) and your usual RPM and feed for it in hardwood.
+3. Is Z zero at the spoilboard right for the bay cut (your flip convention)?
+4. Is there room in the waste for a bay about 2 in wide at both ends of the flip axis?
+5. Is your usual flip end over end? (The plan assumes yes.)
 
-**The slot must go through the full thickness.** On side B the probe comes from above, so its stylus must be in open space from the ball up to the stock top. A slot cut from face A to part depth has a ceiling on side B (the uncut material above it), and the stylus hits it. (Revision 2 said a part-depth slot was enough. That was wrong: the rule it used is for an open edge face, where the stylus stays outside the stock.) So the slot needs a bit at least as long as the stock is thick, cutting from outside.
-
-**Layout** (same rules as the holes):
-
-- Two U-shaped through slots, cut with an end mill moving inward from outside, on the flip axis, at opposite ends. For an end-over-end flip (axis Y = H/2): one in the left edge, one in the right edge. On the flip axis, the side-A and side-B coordinates are the same.
-- Different widths (for example 0.5 and 0.625 in), so a wrong flip fails, as with holes. The width must leave room for the ball and stylus.
-- Length into the stock about 1 in. Reference point: the centre of the round end (the tool's end position in CAM).
-- CAM: the cutter enters and leaves from outside the stock; its retract and linking moves must stay low and outside the stock, because a full-length bit cannot be lifted above it.
-
-**Probing on side B.** The operator parks the ball outside each slot opening at the probing height. The routine moves in along the slot to the round end, then:
-
-- touches both side walls: a two-sided pair, so the across-slot coordinate cancels ball size, pretravel and backlash exactly, as a hole does;
-- touches the slot end: one-sided. Half the measured width bias corrects it for the ball size and pretravel. What remains (for example backlash) has the opposite sign at the two opposite slots, so it cancels in the translation and shows only as a spacing error, which the existing spacing check already reports.
-
-The rotation comes from the across-slot coordinates of the two slots (two-sided, exact) over their full spacing. So the accuracy is about the same as the hole mode.
-
-**Reuse.** The design entry (X, Y, width), size matching, symmetric-layout check, side-A/side-B mirror check, rigid fit, spacing check, rewriter and runtime checks are the hole-mode code. New: the slot's opening direction (taken from the nearest stock-box edge), the touch pattern (one wall pair plus the end, entered from outside) and the centre calculation.
-
-**Without a full-length bit (option, not the default).** Side A cuts the slots from face A to past mid-thickness. On side B, a clearance pocket above each slot exposes it:
-
-1. With the cutter in, the operator jogs to each slot opening, which is visible on the edge face. The window records the two rough positions.
-2. Virtual Dowel writes a short clearance file: an oversize pocket above each slot (for example width + 0.25 in), from face B down to just into the side-A slot.
-3. The operator runs it, changes to the probe, and probes the exposed slot walls as above. Then changes back to the cutter for the side-B jobs.
-
-This keeps hole-level accuracy and automatic wrong-flip detection, but adds a cutting step and one more tool change on side B. Rough positions within about 0.1 in are enough.
-
-**Needs and risks:**
-
-- Waste at both ends of the flip axis.
-- Wall tilt from the tram, as in the hole mode.
-- The probe body must stay above the stock top when the ball is in the slot (the same band limit as in section 4).
-
-## 11. Questions for Nikolai
-
-1. **A or B first?** Do you have a bit at least as long as your thickest stock, that cuts cleanly from outside at full depth? Do most thick parts have waste at both ends of the flip axis?
-2. **Probe band:** with Z at the top of its travel, how high is the ball above the spoilboard? How long is the free stylus (from the ball to where the probe body gets wider)? And the thickest stock you plan?
-3. **Edges in one pass or two halves?** If two halves, the band must reach T/2 + s on side B.
-4. Can the clamps keep 2 in each way from every corner free (mode A) or the slot openings free (mode B)?
-5. What registration do you need for the thick work (for example 0.005 in)?
-6. Is your usual flip end over end, with the reference corner front-left on side A? (The plan assumes yes.)
-
-## 12. Phase 0: findings from the v2.0 review
+## 13. Phase 0: findings from the v2.0 review
 
 Three independent review passes read all the code (2026-10-04). Each item says how it was checked: **run** (reproduced with code), **traced** (code paths read end to end), or **hypothesis** (needs the machine). The fit maths, the hole matching, the symmetry and mirror checks, and the unit scaling had no defect.
 
