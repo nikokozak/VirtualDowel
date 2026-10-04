@@ -2,7 +2,7 @@
 
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
-Status: proposal, revision 2, 2026-10-04. No code for this is written yet. Nikolai must choose the direction (section 2) before work starts. Revision 2 adds Nikolai's constraints: the probe cannot reach the top of thick stock, Z is set by the operator, and the edges are machined on the CNC.
+Status: proposal, revision 3, 2026-10-04. No code for this is written yet. Nikolai must choose the direction (section 2) before work starts. Revision 2 adds Nikolai's constraints: the probe cannot reach the top of thick stock, Z is set by the operator, and the edges are machined on the CNC. Revision 3 corrects the slot depth: edge slots must go through the full thickness (Nikolai found the error).
 
 ## 1. Problem and constraints
 
@@ -19,7 +19,7 @@ Constraints from Nikolai:
 
 **A. Edge mode (Nikolai's proposal).** Probe two edges at each of the four corners, make a line through each edge, intersect the lines to get the corners, pick one corner as the job zero and one edge as the X direction. Do it on both sides with the same physical corner and edge. Uses no waste; the stock edges are the reference. Sections 3-9.
 
-**B. Edge-slot mode (alternative).** Side A cuts two short U-shaped slots, open to the outside, at the two ends of the flip axis, with different widths. These are "half-holes" at the edges. The cutter and the probe both come in from outside the stock, so neither has to be above it. On side B the routine probes the slots as it probes holes now. Section 10.
+**B. Edge-slot mode (alternative).** Side A cuts two short U-shaped slots through the full thickness, open to the outside, at the two ends of the flip axis, with different widths. These are "half-holes" at the edges. The cutter and the probe both come in from outside the stock, so neither has to be above it. On side B the routine probes the slots as it probes holes now. **It needs a bit at least as long as the stock is thick** (the same bit as one-pass edges). Section 10.
 
 | | A. Edges | B. Edge slots |
 |---|---|---|
@@ -29,9 +29,10 @@ Constraints from Nikolai:
 | Wrong flip direction detected | no (operator mark only) | yes, by the slot widths, as with holes |
 | Depends on edge quality, edge tilt, two-half edges | yes | no |
 | Needs waste at both ends of the flip axis | no | yes |
+| Needs a bit as long as the stock is thick | no (two-half edges work, with limits) | yes |
 | New code | new measurement, fit, window picker, simulator model | new touch pattern only; the rest of the hole mode is reused |
 
-**Recommendation:** build B first for parts that have waste at both ends of the flip axis, because it is more accurate, less work at the machine, and reuses the proven hole code. Build A for parts that use the whole stock. If most thick parts fill the stock, build A first.
+**Recommendation:** if a full-length bit is available, build B first for parts with waste at both ends of the flip axis: it is more accurate, less work at the machine, and reuses the proven hole code. Without a full-length bit, build A.
 
 ## 3. Edge mode: the method
 
@@ -75,6 +76,7 @@ Side A touches at height h (above face B). Side B touches the same physical heig
 
 - **One-pass edges:** use h = T/2 on both sides (the same Z number when Z zero is at the spoilboard). The band must include T/2.
 - **Two-half edges:** probe the same half on both sides, away from the step: h = T/2 - s on side A and T/2 + s on side B (s = step clearance, for example 0.25 in). The band must include T/2 - s to T/2 + s. If it does not, the same-half rule cannot be met: the step offset and the tilt then go straight into the result.
+  One side always probes the lower half of the edge. If the other half sticks out over it by more than the ball-to-stem clearance (ball radius minus stylus stem radius), the stem touches the overhang. So probe the half that sticks out, or keep the step smaller than that clearance.
 
 The window computes the two heights from T, s and the band, and refuses a height outside the band.
 
@@ -175,14 +177,16 @@ Machine tests (phase 4):
 
 ## 10. Edge-slot mode (alternative B)
 
-**Idea.** A reference hole whose centre is at the stock edge becomes a slot that opens to the outside. A cutter can cut it from outside the stock, the same way Nikolai plans to machine the edges, so it does not have to be above the stock. The probe can also enter it from outside, at its working height.
+**Idea.** A reference hole whose centre is at the stock edge becomes a slot that opens to the outside. A cutter can cut it from outside the stock, the same way as a one-pass edge, so it never has to be above the stock. The probe enters it from outside, at its working height.
+
+**The slot must go through the full thickness.** On side B the probe comes from above, so its stylus must be in open space from the ball up to the stock top. A slot cut from face A to part depth has a ceiling on side B (the uncut material above it), and the stylus hits it. (Revision 2 said a part-depth slot was enough. That was wrong: the rule it used is for an open edge face, where the stylus stays outside the stock.) So the slot needs a bit at least as long as the stock is thick, cutting from outside.
 
 **Layout** (same rules as the holes):
 
-- Two U-shaped slots, cut with an end mill moving inward from outside, on the flip axis, at opposite ends. For an end-over-end flip (axis Y = H/2): one in the left edge, one in the right edge. On the flip axis, the side-A and side-B coordinates are the same.
-- Different widths (for example 0.5 and 0.625 in), so a wrong flip fails, as with holes.
+- Two U-shaped through slots, cut with an end mill moving inward from outside, on the flip axis, at opposite ends. For an end-over-end flip (axis Y = H/2): one in the left edge, one in the right edge. On the flip axis, the side-A and side-B coordinates are the same.
+- Different widths (for example 0.5 and 0.625 in), so a wrong flip fails, as with holes. The width must leave room for the ball and stylus.
 - Length into the stock about 1 in. Reference point: the centre of the round end (the tool's end position in CAM).
-- Depth from face A: enough to reach the probe band on side B. Side A cuts from face A, so on side B the slot is at the bottom, from the spoilboard up to the slot depth. Depth at least T - free stylus length + about 0.3 in. It does not need to go through.
+- CAM: the cutter enters and leaves from outside the stock; its retract and linking moves must stay low and outside the stock, because a full-length bit cannot be lifted above it.
 
 **Probing on side B.** The operator parks the ball outside each slot opening at the probing height. The routine moves in along the slot to the round end, then:
 
@@ -193,16 +197,23 @@ The rotation comes from the across-slot coordinates of the two slots (two-sided,
 
 **Reuse.** The design entry (X, Y, width), size matching, symmetric-layout check, side-A/side-B mirror check, rigid fit, spacing check, rewriter and runtime checks are the hole-mode code. New: the slot's opening direction (taken from the nearest stock-box edge), the touch pattern (one wall pair plus the end, entered from outside) and the centre calculation.
 
+**Without a full-length bit (option, not the default).** Side A cuts the slots from face A to past mid-thickness. On side B, a clearance pocket above each slot exposes it:
+
+1. With the cutter in, the operator jogs to each slot opening, which is visible on the edge face. The window records the two rough positions.
+2. Virtual Dowel writes a short clearance file: an oversize pocket above each slot (for example width + 0.25 in), from face B down to just into the side-A slot.
+3. The operator runs it, changes to the probe, and probes the exposed slot walls as above. Then changes back to the cutter for the side-B jobs.
+
+This keeps hole-level accuracy and automatic wrong-flip detection, but adds a cutting step and one more tool change on side B. Rough positions within about 0.1 in are enough.
+
 **Needs and risks:**
 
 - Waste at both ends of the flip axis.
-- CAM: the cutter enters and leaves from outside the stock, with retract heights that never go over the stock. Nikolai's edge passes need the same.
-- Wall tilt from the tram, as in the hole mode (the hole mode probes near the exit, so it has the same effect).
+- Wall tilt from the tram, as in the hole mode.
 - The probe body must stay above the stock top when the ball is in the slot (the same band limit as in section 4).
 
 ## 11. Questions for Nikolai
 
-1. **A or B first?** Do most thick parts have waste at both ends of the flip axis?
+1. **A or B first?** Do you have a bit at least as long as your thickest stock, that cuts cleanly from outside at full depth? Do most thick parts have waste at both ends of the flip axis?
 2. **Probe band:** with Z at the top of its travel, how high is the ball above the spoilboard? How long is the free stylus (from the ball to where the probe body gets wider)? And the thickest stock you plan?
 3. **Edges in one pass or two halves?** If two halves, the band must reach T/2 + s on side B.
 4. Can the clamps keep 2 in each way from every corner free (mode A) or the slot openings free (mode B)?
