@@ -823,11 +823,10 @@ class SbpTransformer:
             self.mode_known = True
             self._warn("mode", "no SA/SR before the first move - absolute mode assumed (SA added to header)")
 
-    def _need_pos(self) -> Tuple[float, float]:
+    def _need_pos(self, what: str = "this move leaves X or Y blank (or moves one axis only)") -> Tuple[float, float]:
         if self.pos is None:
-            raise ValueError("this move leaves X or Y blank (or moves one axis only) but the current "
-                             "position is unknown here (start of file, after a label, GOSUB, SK or a "
-                             "custom cut); it cannot be aligned safely")
+            raise ValueError(f"{what} but the current position is unknown here (start of file, after a "
+                             "label, GOSUB, JH/MH, SK or a custom cut); it cannot be aligned safely")
         return self.pos
 
     def _jump_target(self) -> None:
@@ -1017,13 +1016,15 @@ class SbpTransformer:
             self.stats.extent(q)
             self.stats.design_extent((x, y))
         else:
+            # a relative move is aligned by rotating it only if the tool is at an aligned point; after
+            # JH/MH, SK or a custom cut it is not (e.g. JH leaves it at machine X0,Y0)
+            cur = self._need_pos("this is a relative move (SR)")
             dx = 0.0 if x is None else x
             dy = 0.0 if y is None else y
             q = self.fit.vec(dx, dy)
-            if self.pos is not None:
-                self.pos = (self.pos[0] + dx, self.pos[1] + dy)
-                self.stats.extent(self.fit.point(*self.pos))
-                self.stats.design_extent(self.pos)
+            self.pos = (cur[0] + dx, cur[1] + dy)
+            self.stats.extent(self.fit.point(*self.pos))
+            self.stats.design_extent(self.pos)
         return fmt(q[0]), fmt(q[1])
 
     @staticmethod
@@ -1077,6 +1078,9 @@ class SbpTransformer:
         else:
             if (p[3] == "" or p[4] == "") and self.ij is None:
                 raise ValueError("CG without a diameter or I/J offsets and no earlier I/J to inherit")
+            if p[1] == "" and p[2] == "":
+                # the centre is the current position plus I/J, so the position must be an aligned one
+                self._need_pos("this CG is a full circle around the current position")
             i = self._num(p[3], "I") if p[3] != "" else self.ij[0]
             j = self._num(p[4], "J") if p[4] != "" else self.ij[1]
             self.ij = (i, j)

@@ -788,9 +788,21 @@ class TestTransformer(unittest.TestCase):
         self.assertEqual(tr.stats.checks, 7)
         self.assertNotIn("PAUSE 2\nGOSUB", out)
 
-    def test_relative_moves_rotate_without_translation(self):
-        out, _ = self.tf("SR\nM2,1,0", 90.0, 5.0, 5.0)
+    def test_relative_moves_need_a_known_position(self):
+        # After JH the tool is at machine X0,Y0, not at the design origin's aligned position, so a
+        # relative move from there would be cut offset by the translation. Same at the start of a
+        # file, after SK, a custom cut or a label. A full circle with a blank end point is the same.
+        R = self.assertRejected
+        R("SR\nM2,1,0", "relative")
+        R("SA\nJ2,5,5\nJH\nSR\nM2,1,0", "relative")
+        R("SA\nJ2,5,5\nSK\nSR\nM2,1,0", "relative")
+        R("SA\nJ2,5,5\nC9\nSR\nMX,1", "relative")
+        R("SA\nJ2,0,0\nJH\nCG, , , ,1.5,0,T,1", "full circle")
+        # relative moves from a known (aligned) position rotate without translation
+        out, _ = self.tf("SA\nJ2,2,3\nSR\nM2,1,0", 90.0, 5.0, 5.0)
         self.assertIn("M2,0.000000,1.000000", out)
+        out, _ = self.tf("SA\nJ2,2,3\nJH\nJ2,0,0\nCG, , , ,1.5,0,T,1", 90.0, 5.0, 5.0)
+        self.assertIn("CG, , , ,0.000000,1.500000,T,1", out)
 
     def test_line_splitting_ignores_unicode_separators(self):
         text = "SA\n'Pocket\x85 J2 0,0\nJ2,1,1\n"
