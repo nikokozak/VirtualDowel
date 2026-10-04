@@ -32,7 +32,7 @@ python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --ho
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (110 tests at v2.0). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (113 tests at v2.0.1). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 

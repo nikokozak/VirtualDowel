@@ -158,7 +158,7 @@ Each phase ends with all tests passing and a short report. Nothing is called "wo
 
 | Phase | Content | Check |
 |---|---|---|
-| 0 | Fixes from the v2.0 review (section 12). Items 1-4 approved 2026-10-04. | existing tests plus a new test for each fix |
+| 0 | Fixes from the v2.0 review (section 12). Items 1-4 done in v2.0.1; the others wait for a decision. | existing tests plus a new test for each fix |
 | 1 | Python: parser, fit, checks, shared write path, CLI (for the chosen mode) | unit tests with synthetic touches; the side-A -> flip -> side-B registration test |
 | 2 | Routine in `vd_probe.sbp`; SIM (dry run); VM model | VM end-to-end runs: square and rhomboid stock, rotated board, mm machine, spin-180, clamp in the path, no contact; static lint tests |
 | 3 | Window | window tests (with Tk) |
@@ -213,7 +213,7 @@ The rotation comes from the across-slot coordinates of the two slots (two-sided,
 
 Three independent review passes read all the code (2026-10-04). Each item says how it was checked: **run** (reproduced with code), **traced** (code paths read end to end), or **hypothesis** (needs the machine). The fit maths, the hole matching, the symmetry and mirror checks, and the unit scaling had no defect.
 
-**Fix first (wrong result or safety rule broken). Items 1-4 approved by Nikolai on 2026-10-04:**
+**Fix first (wrong result or safety rule broken). Items 1-4 approved by Nikolai on 2026-10-04 and done in v2.0.1:**
 
 1. **Relative moves after `JH`/`MH` are cut in the wrong place.** *Run.* `SA / J2,5,5 / JH / SR / M2,1,0` is accepted: the relative moves are rotated but not shifted. After `JH` the tool is at machine 0,0, not at the design origin, so the path is offset by the translation. A `CG` with a blank end after `JH` is the same. Files that start in `SR` with no absolute move are accepted too. Fix: reject a relative move or a blank-end `CG` until an absolute move with X and Y has set the position (`vd_align.py:948-954`, `1019-1027`). Nikolai's VCarve and Fusion posts write absolute moves, so his real files are probably not affected.
 2. **An old probing file can run again.** *Traced.* Nothing resets `vd_run.sbp` after a run (the `write_run_stub` docstring says something does). If SB3 cannot start Python at the next C80, the previous `vd_run.sbp` runs, and its `newsession` call fails in the same way. Fix: write the stub when the window opens after probing (`align`, `calresult`), and let the start file write an `END` stub with OPEN/WRITE before its SHELL line.
