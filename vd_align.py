@@ -1690,12 +1690,16 @@ CUSTOM_CUT_NUMBERS = range(80, 90)
 def start_file_text(py: str, script: str, run_file: str, custom: bool = False) -> str:
     """vd_start.sbp / the custom cut: open the window (step 1), then run what it prepared (step 2).
     SHELL ... SYNC waits until the window is closed. The window always rewrites vd_run.sbp - with the
-    probing routine on Start, or with an empty file when closed without starting."""
+    probing routine on Start, or with a stub when closed without starting. vd_run.sbp is emptied first,
+    so if Python does not start at all, the FP runs nothing instead of an earlier job's probing run."""
     lines = [CUSTOM_CUT_MARK if custom else "'VIRTUAL DOWEL - vd_start.sbp",
              "'Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.",
              "'Opens the Virtual Dowel window: choose the side-B files - holes - probe settings there.",
              "'Clicking Start in the window writes vd_run.sbp - which ShopBot then runs here.",
              "'Written by vd_install.bat - run it again if the VirtualDowel folder moves.",
+             "'Empty vd_run.sbp first - if the window cannot start nothing old runs.",
+             f'OPEN "{run_file}" FOR OUTPUT AS #1',
+             "CLOSE #1",
              f'&vd_pyexe = "{py}"',
              f'&vd_script = "{script}"',
              '&vd_cmd = &vd_pyexe & " " & &vd_script & " prepare"',
@@ -1944,7 +1948,7 @@ def render_run(template_text: str, values: Dict[str, object], note: str = "") ->
 
 
 def write_run_stub(message: str = "", path: str = None) -> None:
-    """vd_run.sbp when nothing is prepared: closing the window without starting, or after a run."""
+    """vd_run.sbp when nothing is prepared: the window closed without starting, or could not open."""
     lines = ["'Virtual Dowel - nothing prepared. Type the Virtual Dowel custom cut (C80) to open the window."]
     if message:
         lines.append(f"MSGBOX({msg_safe(message)},64,Virtual Dowel)")

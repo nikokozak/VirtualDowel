@@ -91,7 +91,7 @@ The script doesn't care where Setup 2's origin is. It needs one thing: the hole 
    - points `vd_probe.sbp` and `vd_selftest.sbp` at the folder they're in;
    - makes a small Python environment in `venv`, whose `pythonw.exe` has a plain path ShopBot can start;
    - writes `vd_start.sbp` and the custom cut **`C:\SbParts\Custom\Custom80.sbc`**. If Custom80 is someone else's file, it uses the next free number up to 89; it never overwrites a custom cut that isn't Virtual Dowel's. The output says which number it used.
-   - Run it again whenever you move the folder or reinstall Python.
+   - Run it again whenever you move the folder, reinstall Python, or update Virtual Dowel (it rewrites the custom cut and `vd_start.sbp`).
 4. **Calibrate the probe once** (section 3a). It finds the probe's input and measures it; the settings are saved for every later run.
 
 You no longer edit `vd_probe.sbp`. The window keeps the probe settings in `vd_machine.json`; on first use it starts from whatever `vd_probe.sbp` contains, so earlier hand edits carry over.

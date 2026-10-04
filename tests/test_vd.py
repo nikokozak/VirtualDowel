@@ -367,6 +367,20 @@ class TestInstall(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
+    def test_start_file_empties_the_run_file_before_starting_python(self):
+        # If SB3 cannot start Python (or the window dies before it writes anything), the FP that
+        # follows must not run the probing file prepared for an earlier job.
+        run = "C:\\VD\\vd_run.sbp"
+        for custom in (False, True):
+            text = va.start_file_text("C:\\VD\\venv\\Scripts\\pythonw.exe", "C:\\VD\\vd_align.py", run, custom)
+            lines = text.splitlines()
+            self.assertLess(lines.index(f'OPEN "{run}" FOR OUTPUT AS #1'), lines.index("SHELL, &vd_cmd, 1, SYNC"))
+            vm = VM(text, Machine(holes=[]), UI(), numfmt=vb_single).run()
+            self.assertEqual(vm.closed[1], (run, []))          # truncated; nothing written into it
+            self.assertEqual(vm.fp, [run])
+            self.assertEqual(risky_string_lines(text), [])
+            self.assertEqual(text.count("\r\n"), len(lines))
+
     def test_paths_shopbot_cannot_handle_are_refused(self):
         tmp = tempfile.mkdtemp()
         try:
