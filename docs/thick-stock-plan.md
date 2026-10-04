@@ -266,7 +266,7 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 | 0 | v2.0 review fixes (section 13). Items 1-4 done in v2.0.1; the others wait for a decision. | a test per fix |
 | 1 (done) | Python: open-side centre calculation, correction for a turned slot, open-side and stock-box checks; rough fit and bay-file check (moved here from phase 3) | synthetic touches; side-A -> flip -> side-B registration test |
 | 2 | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
-| 3 | Rough locate run in `vd_probe.sbp`; optional key notch (three-line fit); SHELL word for the rough fit | rough fit from noisy jogs (as in `docs/rough_fit_sim.py`); part file refused as a bay file; independent toolpath check of the moved bay file |
+| 3 | Rough locate run in `vd_probe.sbp`; optional key notch (three-line fit); SHELL word for the rough fit | VM run of the rough locate; three-line fit from noisy jogs (as in `docs/rough_fit_sim.py`); lint |
 | 4 | Window: mode switch (holes, half slots, through slots), slot entry, cutter settings, steps, bay drawing | window tests |
 | 5 | README operator section and machine tests | below |
 | 6 | Edge mode | section 10 |
