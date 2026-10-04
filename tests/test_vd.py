@@ -1876,6 +1876,32 @@ class TestRoughFit(unittest.TestCase):
         with self.assertRaises(va.VDError):
             va.run_rough(self.jog(1.0, 1.0, 1.0), self.bay, SLOTS)
 
+    def test_key_notch_for_irregular_stock(self):
+        # the real edges are 0.6 and 0.1 in inside the stock box at the two slots: the openings no longer sit
+        # at known design points. Two openings fail the spacing check; with the key notch it works.
+        deg, tx, ty = 2.0, 1.5, -0.5
+        real = [(12.0, 0.6), (12.0, 29.9)]
+        err = ((0.05, -0.04), (-0.06, 0.03))
+        self.assertFalse(va.run_rough(self.jog(deg, tx, ty, err=err, openings=real), self.bay, SLOTS,
+                                      stock=STOCK24).ok)
+        key = (1.0, 10.0)                                          # small notch in the left edge, real edge 0.3 in
+        path = os.path.join(self.tmp, "rough.csv")
+        pts = [T(deg, tx, ty, o) for o in real + [(0.3, 10.0)]]
+        pts = [(p[0] + e[0], p[1] + e[1]) for p, e in zip(pts, err + ((0.04, 0.05),))]
+        with open(path, "w") as fh:
+            fh.write(rough_text(pts))
+        res = va.run_rough(path, self.bay, SLOTS, stock=STOCK24, key=key)
+        self.assertTrue(res.ok, res.report)
+        self.assertIn("Key notch", res.report)
+        fit = va.Fit(math.radians(res.rotation_deg), res.shift[0], res.shift[1], [])
+        for d in SLOTS:
+            self.assertLess(math.dist(fit.point(*d[:2]), T(deg, tx, ty, d[:2])), 0.2)
+
+    def test_line_fit_needs_lines_that_are_not_all_parallel(self):
+        with self.assertRaises(va.VDError):
+            va.fit_lines([((0, 0), (0.0, 1.0)), ((5, 0), (0.0, 1.0)), ((9, 0), (0.0, 1.0))],
+                         [(0, 0), (5, 0.1), (9, 0.2)])
+
     def test_rough_data_rules(self):
         path = self.jog(0.0, 0.0, 0.0)
         text = open(path).read()
@@ -1885,6 +1911,44 @@ class TestRoughFit(unittest.TestCase):
                 fh.write(bad)
             with self.assertRaises(va.ProbeDataError):
                 va.run_rough(path, self.bay, SLOTS, stock=STOCK24)
+
+
+class TestRoughLocateRun(unittest.TestCase):
+    """vd_probe.sbp in rough-locate mode: the bay cutter is in; the operator jogs over each slot opening."""
+
+    def run_rough(self, points, sim=False, answers=None):
+        text = configure(PROBE, rough=1, nholes=len(points), sim=int(sim), after='"rough"')
+        m = Machine(holes=[], mode=1 if sim else 0)
+        ui = UI(parks=[] if sim else [(x, y, 1.0) for x, y in points],
+                sim_inputs=[(x, y, 0.0) for x, y in points] if sim else None, answers=answers)
+        return TrackingVM(text, m, ui, numfmt=vb_single).run(), m, ui
+
+    def test_records_each_opening_and_starts_the_window(self):
+        pts = [(13.2, 1.1), (12.7, 31.4)]
+        vm, m, ui = self.run_rough(pts)
+        self.assertEqual(vm.ended, "END")
+        self.assertEqual(m.moves, 0)                              # only the keypad moves the machine
+        self.assertIn("C7", vm.commands)
+        self.assertEqual([c[0].split()[-1] for c in vm.shell], ["newsession", "rough"])
+        rd = va.parse_rough_data(data_text(vm))
+        self.assertEqual(rd.points, pts)
+        self.assertEqual(rd.base, [(3.25, -1.5)] * 2)
+        self.assertFalse(rd.sim)
+
+    def test_simulation(self):
+        pts = [(13.2, 1.1), (12.7, 31.4), (1.0, 10.0)]
+        vm, m, ui = self.run_rough(pts, sim=True)
+        self.assertEqual(m.moves, 0)
+        self.assertEqual([c[0].split()[-1] for c in vm.shell], ["rough"])     # no session clean-up in a dry run
+        rd = va.parse_rough_data(data_text(vm))
+        self.assertTrue(rd.sim)
+        self.assertEqual(rd.points, pts)
+
+    def test_cancel_leaves_no_usable_data(self):
+        vm, m, ui = self.run_rough([(1.0, 1.0), (2.0, 2.0)], answers={"slot opening?": ["Cancel"]})
+        self.assertEqual(vm.shell[-1][0].split()[-1], "newsession")
+        with self.assertRaises(va.ProbeDataError):
+            va.parse_rough_data(data_text(vm))
 
 
 class TestBatch(unittest.TestCase):
@@ -2131,6 +2195,40 @@ def m_moves(vm):
 
 def sbp_lint_problems(text):
     return risky_string_lines(text)
+
+
+class TestPrepareRough(_Folder):
+
+    def test_rough_locate_places_the_bay_file(self):
+        bay = os.path.join(self.tmp, "bays.sbp")
+        with open(bay, "w") as fh:
+            fh.write(BAY_TEXT)
+        old = os.path.join(self.tmp, "old_VD.sbp")                # an aligned file from side A
+        with open(old, "w") as fh:
+            fh.write(f"'==== {va.MARKER} - old\n")
+        va.record_output(old)
+        p = va.prepare_rough([self.job], bay, SLOTS, STOCK24, self.machine,
+                             template=os.path.join(ROOT, "vd_probe.sbp"))
+        self.assertTrue(p.ok, p.errors)
+        self.assertFalse(os.path.exists(old))                     # a new board position
+        text = self.run_file()
+        vals = va._sbp_value_lines(text)
+        self.assertEqual((vals["rough"], vals["nholes"], vals["after"]), ("1", "2", '"rough"'))
+        self.assertTrue(vals["out"].strip('"').endswith("vd_rough_data.csv"))
+        self.assertEqual(va.load_session()["kind"], "rough")
+        deg, tx, ty = 1.5, 2.0, -1.0
+        pts = [T(deg, tx, ty, o) for o in ((12.0, 0.0), (12.0, 30.0))]
+        vm = VM(text, Machine(holes=[]), UI(parks=[(x, y, 1.0) for x, y in pts]), numfmt=vb_single).run()
+        with open(va.ROUGH_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        self.assertEqual(va.main(["rough"]), 0)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "bays_VDROUGH.sbp")))
+
+    def test_problems_are_found_first(self):
+        p = va.prepare_rough([self.job], os.path.join(self.tmp, "nope.sbp"), SLOTS, None, self.machine)
+        self.assertFalse(p.ok)
+        self.assertTrue(any("stock box" in e for e in p.errors))
+        self.assertTrue(any("bay cut file" in e for e in p.errors))
 
 
 class TestCalibration(_Folder):

@@ -47,6 +47,7 @@ MACHINE_FILE = os.path.join(HERE, "vd_machine.json")    # probe settings chosen 
 TEMPLATE_FILE = os.path.join(HERE, "vd_probe.sbp")      # the probing routine, used as a template
 RUN_FILE = os.path.join(HERE, "vd_run.sbp")             # written by the window, run by ShopBot
 CAL_DATA = os.path.join(HERE, "vd_cal_data.csv")        # calibration touches (never the job data)
+ROUGH_DATA = os.path.join(HERE, "vd_rough_data.csv")    # half slots: jogged slot openings (rough locate)
 
 # Distances in INCHES (scaled by 25.4 when the probe data is in mm).
 # Override any of them with a vd_settings.json file next to this script.
@@ -2224,6 +2225,58 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     return Prepared(True, [], checks, path)
 
 
+def prepare_rough(jobs: Sequence[str], bay_file: str, design: List[DesignHole], stock: Optional[Box],
+                  machine: Dict[str, float], key: Optional[Sequence[float]] = None, sim: bool = False,
+                  template: str = None, run_path: str = None) -> Prepared:
+    """Half-slot mode, side B, first step (cutter in): write vd_run.sbp as a rough-locate run. The operator
+    jogs the bit tip over each slot opening (and the key notch); the window then places the bay cut file.
+    A new board position: aligned files and data from earlier runs go now."""
+    errs = machine_errors(machine)
+    if not 2 <= len(design) <= 6:
+        errs.append("enter 2 to 6 half slots")
+    if stock is None:
+        errs.append("half slots need the stock box (side-B coordinates)")
+    if not os.path.isfile(bay_file):
+        errs.append(f"bay cut file not found: {bay_file}")
+    missing = [j for j in jobs if not os.path.isfile(j)]
+    if missing:
+        errs.append("file not found: " + "; ".join(missing))
+    if errs:
+        return Prepared(False, errs, [])
+    with open(template or TEMPLATE_FILE, "r", encoding="latin-1", newline="") as fh:
+        tpl = fh.read()
+    cur = _sbp_value_lines(tpl).get("out", "").strip('"')
+    sep = "\\" if "\\" in cur else "/"
+    out = (cur.rsplit(sep, 1)[0] + sep + os.path.basename(ROUGH_DATA)) if sep in cur else ROUGH_DATA
+    vals: Dict[str, object] = {k: machine[k] for k in PROBE_FIELDS}
+    vals.update(nholes=len(design) + (1 if key else 0), sim=int(sim), cal=0, calref=0, detect=0, launched=1,
+                after="rough", rough=1, out=out, test=0)
+    text = render_run(tpl, vals, note=f"rough locate of {len(design)} half slots" + (" and the key notch" if key else ""))
+    data = text.encode("latin-1", errors="replace")
+    if not sim:
+        new_session()
+    try:
+        os.remove(ROUGH_DATA)
+    except OSError:
+        pass
+    save_session({"kind": "rough", "jobs": list(jobs), "bay": bay_file, "holes": [list(d) for d in design],
+                  "stock": list(stock), "key": list(key) if key else None, "sim": bool(sim), "prepared": time.time()})
+    path = run_path or RUN_FILE
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return Prepared(True, [], [], path)
+
+
+def rough_from_session(data_path: str = None) -> Result:
+    """The rough fit for the session prepared by prepare_rough (the routine's 'rough' word)."""
+    sess = load_session()
+    if sess.get("kind") != "rough":
+        raise VDError("no rough locate was prepared - start it from the Virtual Dowel window (C80)")
+    design = [tuple(h) for h in sess["holes"]]
+    return run_rough(data_path or ROUGH_DATA, sess["bay"], design, stock=tuple(sess["stock"]),
+                     key=tuple(sess["key"]) if sess.get("key") else None)
+
+
 def prepare_calibration(machine: Dict[str, float], ref_dia: float, passes: int = 10, spin180: bool = True,
                         detect: bool = True, sim: bool = False, template: str = None,
                         run_path: str = None) -> Prepared:
@@ -2624,6 +2677,59 @@ def parse_rough_data(text: str, path: str = "") -> RoughData:
                      points=[p for p, _ in order], base=[b for _, b in order], path=path)
 
 
+def fit_lines(lines: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]],
+              pts: Sequence[Tuple[float, float]]) -> Fit:
+    """Rigid fit that puts each measured point on its design line (point a, unit normal n): a jogged slot
+    opening only shows where the slot's axis is, not where along it. Needs three lines that are not all
+    parallel (two slots on the flip axis and the key notch). Gauss-Newton; converges in a few steps."""
+    th = tx = ty = 0.0
+    for _ in range(30):
+        c, s = math.cos(th), math.sin(th)
+        J, r = [], []
+        for (a, n), (mx, my) in zip(lines, pts):
+            qx, qy = c * (mx - tx) + s * (my - ty), -s * (mx - tx) + c * (my - ty)   # machine -> design
+            r.append(n[0] * (qx - a[0]) + n[1] * (qy - a[1]))
+            dqx, dqy = -s * (mx - tx) + c * (my - ty), -c * (mx - tx) - s * (my - ty)
+            J.append((n[0] * dqx + n[1] * dqy, n[0] * -c + n[1] * s, n[0] * -s + n[1] * -c))
+        A = [[sum(j[a] * j[b] for j in J) for b in range(3)] for a in range(3)]
+        g = [-sum(j[a] * rr for j, rr in zip(J, r)) for a in range(3)]
+        for i in range(3):                                    # Gaussian elimination with partial pivoting
+            piv = max(range(i, 3), key=lambda q: abs(A[q][i]))
+            A[i], A[piv], g[i], g[piv] = A[piv], A[i], g[piv], g[i]
+            if abs(A[i][i]) < 1e-12:
+                raise VDError("the slot and key notch openings do not fix the position (all their axes are parallel)")
+            for q in range(i + 1, 3):
+                f = A[q][i] / A[i][i]
+                A[q] = [A[q][b] - f * A[i][b] for b in range(3)]
+                g[q] -= f * g[i]
+        d = [0.0, 0.0, 0.0]
+        for i in (2, 1, 0):
+            d[i] = (g[i] - sum(A[i][b] * d[b] for b in range(i + 1, 3))) / A[i][i]
+        th, tx, ty = th + d[0], tx + d[1], ty + d[2]
+        if max(abs(v) for v in d) < 1e-12:
+            break
+    c, s = math.cos(th), math.sin(th)
+    res = []
+    for (a, n), (mx, my) in zip(lines, pts):
+        qx, qy = c * (mx - tx) + s * (my - ty), -s * (mx - tx) + c * (my - ty)
+        e = n[0] * (qx - a[0]) + n[1] * (qy - a[1])
+        res.append((e * n[0], e * n[1]))
+    return Fit(th, tx, ty, res)
+
+
+def fit_inverse(fit: Fit, p: Tuple[float, float]) -> Tuple[float, float]:
+    """Machine point -> design coordinates."""
+    c, s = math.cos(fit.theta), math.sin(fit.theta)
+    dx, dy = p[0] - fit.tx, p[1] - fit.ty
+    return (c * dx + s * dy, -s * dx + c * dy)
+
+
+def slot_axis_line(d: Sequence[float], box: Tuple[float, float, float, float]) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """A half slot's (or key notch's) axis as (point, unit normal), from the side it opens to."""
+    ax, _ = open_side(d[0], d[1], box)
+    return (d[0], d[1]), ((0.0, 1.0) if ax == 1 else (1.0, 0.0))
+
+
 def default_rough_path(bay_path: str, sim: bool) -> str:
     stem, _ = os.path.splitext(bay_path)
     return stem + ("_VDROUGHSIM.sbp" if sim else "_VDROUGH.sbp")
@@ -2631,12 +2737,14 @@ def default_rough_path(bay_path: str, sim: bool) -> str:
 
 def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Optional[Box] = None,
               out_path: Optional[str] = None, th: Optional[Dict[str, float]] = None,
-              allow_old_data: bool = False) -> Result:
+              allow_old_data: bool = False, key: Optional[Sequence[float]] = None) -> Result:
     """Half-slot mode, side B, before anything can be probed: place the bay cut file (made in Fusion)
     from the slot openings the operator jogged to. Each opening is where a slot axis meets the stock
     edge, so two of them fix the rotation and both shifts. This rough fit is good to about 0.2 in, so it
     is only ever applied to the bay file: a file that cuts away from the slots (a part file) is refused,
-    and the output is named _VDROUGH. The probing that follows starts a new session, which deletes it."""
+    and the output is named _VDROUGH. The probing that follows starts a new session, which deletes it.
+    key: the key notch (design x, y on its axis) for stock whose edges are not at the stock box: it is
+    jogged last, and then each jogged point only has to lie on its slot's axis line."""
     th = th or load_settings()
     with open(data_path, "r", encoding="latin-1", newline="") as fh:
         rd = parse_rough_data(fh.read(), data_path)
@@ -2648,8 +2756,9 @@ def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Op
         raise VDError("the output file must not be the bay file or the rough locate data")
     if os.path.exists(out_path) and not is_aligned_file(out_path):
         raise VDError(f"{out_path} exists and was not written by Virtual Dowel - rename or move it, then try again")
-    if len(design) != len(rd.points):
-        raise VDError(f"{len(rd.points)} slot openings were jogged but {len(design)} slots are listed")
+    if len(design) + (1 if key else 0) != len(rd.points):
+        raise VDError(f"{len(rd.points)} openings were jogged but {len(design)} slots"
+                      + (" and the key notch" if key else "") + " are listed")
     lines, nl = read_text(bay_path)
     box = material_box(lines) or stock
     if box is None:
@@ -2667,9 +2776,14 @@ def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Op
     if not rd.sim and rd.mode != 0:
         fails.append(f"rough locate data was recorded with ShopBot mode {rd.mode} (expected 0 = MOVE)")
     openings = [slot_opening(d, box) for d in design]
-    fit = fit_rigid(openings, rd.points)
-    spacing = _spacing_errors(openings, rd.points)
-    worst = max(abs(e) for *_, e in spacing)
+    if key:
+        # irregular stock: the openings are wherever the real edge is; only their axis lines are known
+        fit = fit_lines([slot_axis_line(d, box) for d in list(design) + [key]], rd.points)
+        worst = 0.0                                        # three lines, three unknowns: nothing to compare
+        openings = [fit_inverse(fit, p) for p in rd.points[:len(design)]]
+    else:
+        fit = fit_rigid(openings, rd.points)
+        worst = max(abs(e) for *_, e in _spacing_errors(openings, rd.points))
     if worst > th["rough_spacing_fail"] * s:
         fails.append(f"the distance between the jogged openings differs from the design by {worst:.3f} "
                      f"{'mm' if rd.units else 'in'} (spacing error) - jog to the slot openings again; if the stock "
@@ -2730,6 +2844,8 @@ def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Op
     L.append("")
     for i, (o, p) in enumerate(zip(openings, rd.points), 1):
         L.append(f"Slot {i} opening: design {o[0]:.3f},{o[1]:.3f} -> jogged {p[0]:.3f},{p[1]:.3f}")
+    if key:
+        L.append(f"Key notch: jogged {rd.points[-1][0]:.3f},{rd.points[-1][1]:.3f} (fixes the position along the slots)")
     L.append(f"Spacing error {worst:+.3f} {u}   Rotation {math.degrees(fit.theta):+.3f} deg   "
              f"Translation X {fit.tx:+.3f} Y {fit.ty:+.3f} {u}")
     L += notes
@@ -2834,6 +2950,17 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     if argv and argv[0].lower() in ("prepare", "align", "calresult"):
         word = argv[0].lower()
         return _window(word, argv[1] if len(argv) > 1 else None)
+    if argv and argv[0].lower() == "rough":
+        # ponytail: no window step yet (phase 4); the result goes to the report and vd_launch.log
+        try:
+            res = rough_from_session(argv[1] if len(argv) > 1 else None)
+        except (OSError, VDError) as e:
+            print(f"ERROR: {e}")
+            _log(f"rough: {e}")
+            return 1
+        print(res.report)
+        _log("rough: " + res.report.splitlines()[0])
+        return 0 if res.ok else 1
     if argv and argv[0].lower() == "sizes":
         return _sizes_cli(argv[1:])
     if argv and argv[0].lower() == "shelltest":

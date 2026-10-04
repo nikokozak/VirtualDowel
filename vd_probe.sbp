@@ -49,6 +49,7 @@
 &vd_open5 = 0
 &vd_open6 = 0
 &vd_slen = 2.5       'half slots - search this far in from where you park outside the opening
+&vd_rough = 0        '1 = rough locate - jog the bay cutter over each slot opening - no probing
 'data file written by this routine - and the Python and script it starts afterwards.
 'vd_install.bat sets all three. The data file must stay next to vd_align.py - the script reads it there.
 'SB3 cannot start a .bat file with SHELL - so it starts python.exe directly.
@@ -130,6 +131,7 @@ SA
 '
 '---------------- DATA FILE - opened first so an aborted run never leaves old data behind ----
 OPEN &vd_out FOR OUTPUT AS #1
+IF &vd_rough = 1 THEN GOTO vd_rough_run
 WRITE #1; "VD,1,"; &vd_units; ","; &vd_sim; ","; &vd_tip; ","; &vd_hole; ","; &vd_nholes; ","; &vd_passes; ","; &vd_spin180; ","; &vd_pin; ","; &vd_trig; ","; &vd_mode
 WRITE #1; "CFG,"; &vd_depth; ","; &vd_margin; ","; &vd_backoff; ","; &vd_fast; ","; &vd_slow; ","; &vd_zspd
 &vd_date = %(146)
@@ -280,6 +282,39 @@ IF &vd_cal = 1 THEN GOTO vd_end
 MSGBOX(For each file that PASSED - fit its cutter - zero Z only - then run its _VD.sbp version. Do NOT re-zero X or Y. If no Virtual Dowel window appeared double-click vd_align.bat in the VirtualDowel folder.,64,Virtual Dowel)
 vd_end:
 END
+'
+'---------------- ROUGH LOCATE - half slots side B before the bay cut - the cutter is in - no probing ----
+'The operator jogs the bit tip over each slot opening on the edge of the board - then the key notch if cut.
+'The window turns these into a rough fit that places the bay cut file only.
+vd_rough_run:
+WRITE #1; "VR,1,"; &vd_units; ","; &vd_sim; ","; &vd_nholes; ","; &vd_mode
+&vd_date = %(146)
+&vd_time = %(147)
+WRITE #1; "DT,"; &vd_date; " "; &vd_time
+MSGBOX(VIRTUAL DOWEL rough locate. Fit the bay cutter with the spindle OFF. You will jog the bit tip over each slot opening on the edge of the board in turn. Continue?,OKCancel,Virtual Dowel)
+IF &msganswer = "Cancel" THEN GOTO vd_quit
+IF &vd_sim = 1 THEN GOTO vd_rough_c7_done
+'a new board position - aligned files from earlier runs go - as at the start of probing
+&vd_cmd = &vd_pyexe & " " & &vd_script & " newsession"
+SHELL, &vd_cmd, 1, SYNC
+IF &vd_c7 = 1 THEN C7
+vd_rough_c7_done:
+&vd_h = 0
+vd_rough_next:
+&vd_h = &vd_h + 1
+IF &vd_h > &vd_nholes THEN GOTO vd_rough_done
+GOSUB vd_rough_jog
+WRITE #1; "R,"; &vd_h; ","; &vd_x0; ","; &vd_y0; ","; &vd_cbx; ","; &vd_cby
+GOTO vd_rough_next
+vd_rough_done:
+WRITE #1; "END,"; &vd_nholes
+CLOSE #1
+MS, &vd_ms0, &vd_mz0
+MSGBOX(Rough locate done. Click OK to open the Virtual Dowel window - it places the bay cut file.,OKCancel,Virtual Dowel)
+IF &msganswer = "Cancel" THEN GOTO vd_end
+&vd_cmd = &vd_pyexe & " " & &vd_script & " " & &vd_after
+SHELL, &vd_cmd, 1, SYNC
+GOTO vd_end
 '
 '=====================================================================
 ' SUBROUTINES   (deepest GOSUB nesting is 5 - including the input handler - for holes and half slots)
@@ -474,6 +509,28 @@ IF &vd_d < 0 THEN GOTO vd_touch_ret
 &vd_trav = &vd_d
 &vd_hit = 1
 vd_touch_ret:
+RETURN
+'
+'---- rough locate: the operator puts the bit tip over the next slot opening ----
+vd_rough_jog:
+IF &vd_sim = 1 THEN GOTO vd_rough_jog_sim
+PRINT "Virtual Dowel - opening "; &vd_h; " of "; &vd_nholes
+MSGBOX(Jog the bit tip over the centre of the next slot opening on the edge of the board - in the order the window shows - the key notch last. Press ESC when done.,64,Virtual Dowel)
+SK
+MSGBOX(Is the bit tip over the centre of the slot opening? Yes to record it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
+IF &msganswer = "No" THEN GOTO vd_rough_jog
+IF &msganswer = "Cancel" THEN GOTO vd_quit
+&vd_x0 = %(1)
+&vd_y0 = %(2)
+&vd_cbx = %(6)
+&vd_cby = %(7)
+RETURN
+vd_rough_jog_sim:
+INPUT "SIMULATION - type X then Y of this slot opening then 0 with commas between them" &vd_sx, &vd_sy, &vd_sd
+&vd_x0 = &vd_sx
+&vd_y0 = &vd_sy
+&vd_cbx = %(6)
+&vd_cby = %(7)
 RETURN
 '
 '---- half slots: which reference &vd_h is - and its directions ----

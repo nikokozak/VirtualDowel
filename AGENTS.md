@@ -36,7 +36,7 @@ python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --ho
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (145 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (152 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -77,16 +77,16 @@ Data flow:
 
 Key functions in `vd_align.py`: `parse_probe_data`, `compute_holes`, `fit_rigid`, `align`, `hole_checks`, `mirror_alternatives`, `SbpTransformer`, `build_output`, `run_alignment`, `render_run`, `prepare_probing`, `install_paths`.
 
-Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1) and the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); window, README and guide not yet. Not run on the machine.
+Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1), the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`), the size calculator (`slot_bay_sizes`, CLI word `sizes`) and the rough locate (phase 3: `&vd_rough`, `prepare_rough`, word `rough`, key notch via `fit_lines`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); window, README and guide not yet. Not run on the machine.
 
-Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_VDROUGH.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
+Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_rough_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_VDROUGH.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
 
 ## 5. Hard SB3 constraints (confirmed on the real machine)
 
 Each of these caused a real failure. Do not break them. Tests enforce most of them: `test_only_documented_then_actions`, `test_every_pause_is_whole_seconds`, `test_no_operator_characters_in_quoted_text` (`risky_string_lines`), `test_installer_variables_are_not_reused`, and the install/path tests.
 
 - [ ] SHELL starts `.exe` programs. It does not start `.bat` files.
-- [ ] SHELL deletes every `~` and puts spaces around every `/`. Paths given to SB3 contain only letters, digits, `_`, `.`, `:` and `\`. Arguments are plain words (`prepare`, `align`, `calresult`, `newsession`, `shelltest`).
+- [ ] SHELL deletes every `~` and puts spaces around every `/`. Paths given to SB3 contain only letters, digits, `_`, `.`, `:` and `\`. Arguments are plain words (`prepare`, `align`, `calresult`, `rough`, `newsession`, `shelltest`).
 - [ ] In an assignment, quoted text with `- + * / =` is calculated as arithmetic (`&m = "a-b+c"` gives "Undefined variable: A"). These characters are safe only in MSGBOX, PRINT and INPUT prompts.
 - [ ] A timed `PAUSE` under 1 second stops the file in Move mode. Use whole seconds. Preview does not show this.
 - [ ] `%(6)`/`%(7)` do not follow the tool. They hold the table position of the current X/Y zero. Use `%(1)`/`%(2)`/`%(3)` for the tool position (rounded to 0.001). *Not confirmed:* `%(6)`/`%(7)` change when X/Y is zeroed again. The runtime zero check depends on this.
@@ -139,7 +139,7 @@ O,hole,axis,sign              half slot: the hole opens toward (axis, sign); no 
 END,<nholes>                  no END = aborted run
 ```
 
-Rough locate data (half-slot mode, side B, before the bay cut): `VR,1,units,sim,n,mode`, `DT,...`, one `R,i,x,y,bx,by` per jogged slot opening (in the listed slot order), `END,n`.
+Rough locate data `vd_rough_data.csv` (half-slot mode, side B, before the bay cut; written by `vd_probe.sbp` with `&vd_rough = 1`): `VR,1,units,sim,n,mode`, `DT,...`, one `R,i,x,y,bx,by` per jogged opening (the slots in the listed order, then the key notch if cut), `END,n`.
 
 - Sidecar `<job>.sbp.vdholes.txt`: `holeN = x, y, d` lines and an optional `stock = xmin, ymin, xmax, ymax`.
 - `vd_state.json`: `outputs` (`[{path, data_id}]`), `session` (`{kind: probe|cal, jobs, holes, stock, sim, prepared, keep}`), `last_dir`.

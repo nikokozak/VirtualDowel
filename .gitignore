@@ -20,3 +20,4 @@ vd_selftest_chars.txt
 *.vdholes.txt
 *_VDROUGH.sbp
 *_VDROUGHSIM.sbp
+vd_rough_data.csv
