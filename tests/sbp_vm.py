@@ -15,6 +15,8 @@ Simulated physics
   * after the switch, motion continues for speed * latency before stopping
   * ON INP fires only on a CHANGE into the armed state (as documented)
   * any deflection beyond `overtravel` is recorded as a collision
+  * optional `solid` (SlotStock): thick stock with half slots and bays instead of a holed surface;
+    then the stylus stem and the probe body above the ball must never touch anything either
 """
 import math
 import random
@@ -151,11 +153,88 @@ class Expr:
         raise VMError(f"unexpected token {v!r}")
 
 
+# ------------------------------------------------------------------ thick stock with half slots
+def _seg_dist(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+
+class SlotStock:
+    """Side B of the half-slot mode. Geometry in DESIGN coordinates (the side-B job's), placed on the
+    table turned by theta and shifted by t; z = height above the spoilboard. Half slots were cut from
+    face A (now on the spoilboard) up to slot_top; bays from the top T down to bay_floor.
+    slots: [(x, y, width, (axis, sign))] - round-end centre, width, the side the slot opens to.
+    bays: [(x0, y0, x1, y1)] axis-aligned boxes in design coordinates (placed by the rough fit).
+    probe: stem radius, free stem length (ball centre to the body), body radius and length, nut radius."""
+
+    def __init__(self, W, H, T, theta, t, slots, slot_top, bays=(), bay_floor=None,
+                 probe=None, chips=()):
+        self.W, self.H, self.T = W, H, T
+        self.c, self.s, self.t = math.cos(theta), math.sin(theta), t
+        self.slot_top = slot_top
+        self.bay_floor = slot_top if bay_floor is None else bay_floor
+        self.bays = list(bays)
+        self.probe = probe or dict(stem=0.04, free=1.0, body=0.4, body_len=2.0, nut=0.9)
+        far = 10.0 * max(W, H, 1.0)
+        self.caps = [((x + sg * far, y) if ax == 1 else (x, y + sg * far), (x, y), w / 2.0)
+                     for x, y, w, (ax, sg) in slots]
+        self.chips = list(chips)              # [(x, y, r)] small bits of debris standing in a slot
+
+    def to_design(self, x, y):
+        dx, dy = x - self.t[0], y - self.t[1]
+        return (self.c * dx + self.s * dy, -self.s * dx + self.c * dy)
+
+    def free(self, x, y, z):
+        """Clearance from (x, y) at height z to the nearest material (negative inside). Never larger
+        than the true clearance, so a move may safely step by it."""
+        if z < 0.0:
+            return z                          # spoilboard
+        if z > self.T:
+            return 1e9                        # nothing above the stock (no clamps modelled)
+        d = -min(x, self.W - x, y, self.H - y)
+        if z <= self.slot_top:
+            for a, c, r in self.caps:
+                d = max(d, r - _seg_dist(x, y, a[0], a[1], c[0], c[1]))
+        if z >= self.bay_floor:
+            for x0, y0, x1, y1 in self.bays:
+                d = max(d, min(x - x0, x1 - x, y - y0, y1 - y))
+        for cx, cy, r in self.chips:
+            if z <= self.slot_top:
+                d = min(d, math.hypot(x - cx, y - cy) - r)
+        return d
+
+    def ball_pen(self, mx, my, z, rt):
+        x, y = self.to_design(mx, my)
+        if all(abs(z - lv) > rt for lv in (0.0, self.slot_top, self.bay_floor, self.T)):
+            return rt - self.free(x, y, z)
+        best = -1e9                           # near a floor/ceiling: look at slices of the ball
+        for k in (-1.0, -0.5, 0.0, 0.5, 1.0):
+            h = 0.999 * k * rt
+            best = max(best, math.sqrt(rt * rt - h * h) - self.free(x, y, z + h))
+        return best
+
+    def body_hit(self, mx, my, z, rt):
+        """What touches besides the ball: ('stem'|'body'|'nut', height) or None."""
+        x, y = self.to_design(mx, my)
+        p = self.probe
+        zb = z + p["free"]
+        for name, r, z0, z1 in (("stem", p["stem"], z + rt, zb), ("body", p["body"], zb, zb + p["body_len"]),
+                                ("nut", p["nut"], zb + p["body_len"], zb + p["body_len"] + 0.6)):
+            n = max(1, int((z1 - z0) / 0.05))
+            for i in range(n + 1):
+                zz = z0 + (z1 - z0) * i / n
+                if self.free(x, y, zz) < r - 1e-9:
+                    return (name, round(zz, 3))
+        return None
+
+
 # ------------------------------------------------------------------ machine
 class Machine:
     def __init__(self, holes, tip=0.125, ecc=(0.0, 0.0), pretravel=0.004, latency=0.012,
                  jitter=0.0002, idle=1, overtravel=0.12, base_offset=(3.25, -1.5), units=0,
-                 start=(0.0, 0.0, 1.0), seed=1, mode=0, work_decimals=3, probe_pin=1, other_inputs=None):
+                 start=(0.0, 0.0, 1.0), seed=1, mode=0, work_decimals=3, probe_pin=1, other_inputs=None,
+                 solid=None):
         self.holes = holes              # list of (cx, cy, diameter) in working coords
         self.probe_pin = probe_pin      # input the probe is wired to
         self.other_inputs = dict(other_inputs or {})   # {pin: fixed state} for everything else
@@ -183,10 +262,13 @@ class Machine:
         self.file_prop = (1.0, 1.0)     # %(66) %(67)
         self.cur_pre = pretravel
         self.moves = 0
+        self.solid = solid              # SlotStock: thick stock instead of the holed surface
 
     # geometry ---------------------------------------------------------------------
     def penetration(self, x, y, z):
         """How far the probe ball is pushed into material (<=0: free)."""
+        if self.solid is not None:
+            return self.solid.ball_pen(x + self.ecc[0], y + self.ecc[1], z, self.rt)
         if z >= 0:
             return -1.0
         # material = everything below Z0 except the hole cylinders. The ball is pushed in by the
@@ -240,8 +322,15 @@ class Machine:
         n = max(1, int(L / step))
         fired = None
         stop_s = 1.0
-        for k in range(1, n + 1):
-            s = k / n
+        s = 0.0
+        last_check = 0.0
+        pen = self.penetration(x0, y0, z0) if self.solid is not None else 0.0
+        while s < 1.0:
+            if self.solid is not None and fired is None and pen < -0.003:
+                # far from anything: step by half the clearance (free() never overstates it)
+                s = min(1.0, s + max(1.0 / n, 0.5 * (-pen - 0.002) / L))
+            else:
+                s = min(1.0, (int(round(s * n)) + 1) / n)
             x = x0 + (tx - x0) * s
             y = y0 + (ty - y0) * s
             z = z0 + (tz - z0) * s
@@ -251,6 +340,13 @@ class Machine:
                 self.collisions.append((x, y, z, pen))
                 stop_s = s
                 break
+            if self.solid is not None and ((s - last_check) * L >= 0.01 or s >= 1.0):
+                last_check = s
+                hit = self.solid.body_hit(x + self.ecc[0], y + self.ecc[1], z, self.rt)
+                if hit:
+                    self.collisions.append((x, y, z, hit))
+                    stop_s = s
+                    break
             if fired is None:
                 self.x, self.y, self.z = x, y, z
                 for p, st in armed.items():

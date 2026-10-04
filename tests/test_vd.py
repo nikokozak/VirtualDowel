@@ -20,7 +20,7 @@ sys.path.insert(0, HERE)
 
 import vd_align as va                      # noqa: E402
 import sim_sbp                             # noqa: E402
-from sbp_vm import VM, Machine, UI, vb_single, sb3_number, strip_comment   # noqa: E402
+from sbp_vm import VM, Machine, UI, SlotStock, vb_single, sb3_number, strip_comment   # noqa: E402
 
 with open(os.path.join(ROOT, "vd_probe.sbp"), encoding="latin-1") as _fh:
     PROBE = _fh.read()
@@ -1523,6 +1523,194 @@ class TestHalfSlots(unittest.TestCase):
         with self.assertRaises(va.ProbeDataError) as cm:
             va.compute_holes(va.parse_probe_data(extra))
         self.assertIn("open side", str(cm.exception))
+
+
+# ---- the half-slot routine in vd_probe.sbp, run in the simulator on thick stock ------------------
+# side B of a 24 x 30 x 3 in board: slots on the flip axis Y = H/2, cut from face A up to 1.75 in;
+# bays from the top down to 1.6 in. Slots at least 0.6 in wide: the end search runs along a machine
+# axis, so on a turned board it drifts sideways (about 0.17 in over 2 in at 5 deg).
+SB_W, SB_H, SB_T, SB_TOP, SB_FLOOR = 24.0, 30.0, 3.0, 1.75, 1.6
+SLOTS_B = [(1.5, 15.0, 0.625, (1, -1)), (22.5, 15.0, 0.75, (1, 1))]
+PROBE_DIMS = dict(stem=0.04, free=1.0, body=0.4, body_len=2.0, nut=0.9)
+OPEN_CODE = {(1, -1): 1, (1, 1): 2, (2, -1): 3, (2, 1): 4}
+
+
+def bay_box(slot, rt=0.0625, body=0.4, tol=0.4, err=(0.0, 0.0), far=5.0, k=1.0, widest=0.75):
+    """The bay the plan asks for: the probe body follows the ball, so the bay is wider than the widest
+    slot's ball travel by the body radius on each side, and reaches past the round end by the body
+    radius; plus `tol` (rough fit error and the wall check's search). `err` = where the rough fit
+    really put it (design units)."""
+    x, y, w, (ax, sg) = slot
+    rho = widest * k / 2 - rt
+    half, inner = rho + body + tol, rho + body + tol
+    if ax == 1:
+        x0, x1 = sorted((x + sg * far * k, x - sg * inner))
+        y0, y1 = y - half, y + half
+    else:
+        y0, y1 = sorted((y + sg * far * k, y - sg * inner))
+        x0, x1 = x - half, x + half
+    return (x0 + err[0], y0 + err[1], x1 + err[0], y1 + err[1])
+
+
+def slot_run(deg, t, h=0.8, bays=True, tol=0.4, park_err=((0.0, 0.04), (0.0, -0.03)), slots=SLOTS_B, k=1.0,
+             machine_kw=None, ui_kw=None, bay_err=(0.1, -0.08), on_spin=None, **cfg):
+    """k = 25.4 runs the same board on a machine set to mm."""
+    sl = [(x * k, y * k, w * k, od) for x, y, w, od in slots]
+    dims = {n: v * k for n, v in PROBE_DIMS.items()}
+    rt = 0.0625 * k
+    boxes = [bay_box(sv, rt=rt, body=dims["body"], tol=tol * k, err=(bay_err[0] * k, bay_err[1] * k), k=k)
+             for sv in sl] if bays else []
+    th = math.radians(deg)
+    stock = SlotStock(SB_W * k, SB_H * k, SB_T * k, th, (t[0] * k, t[1] * k), sl, SB_TOP * k, boxes,
+                      SB_FLOOR * k, probe=dims)
+    parks = []
+    for (x, y, w, (ax, sg)), e in zip(sl, park_err):
+        edge = (0.0 if sg < 0 else SB_W * k) if ax == 1 else (0.0 if sg < 0 else SB_H * k)
+        d = (edge + sg * 0.3 * k, y) if ax == 1 else (x, edge + sg * 0.3 * k)
+        d = (d[0] + e[0] * k, d[1] + e[1] * k)
+        mx, my = T(deg, t[0] * k, t[1] * k, d)
+        parks.append((mx, my, h * k))
+    c = dict(nholes=len(slots), hole=max(sv[2] for sv in slots))
+    c.update({f"open{i}": OPEN_CODE[sv[3]] for i, sv in enumerate(slots, 1)})
+    c.update(cfg)
+    mk = dict(holes=[], solid=stock, start=parks[0], tip=0.125 * k)
+    mk.update(machine_kw or {})
+    m = Machine(**mk)
+    ui = UI(parks=list(parks), **(ui_kw or {}))
+    if on_spin:
+        ui.on_spin = on_spin
+    vm = TrackingVM(configure(PROBE, **c), m, ui, numfmt=vb_single).run()
+    return vm, m, ui, parks
+
+
+class TestSlotRoutine(unittest.TestCase):
+    """vd_probe.sbp on half slots: park outside the opening, find the round end, walls, end, back out."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def fit(self, vm, scale=1.0):
+        pd = va.parse_probe_data(data_text(vm))
+        design = [(x * scale, y * scale, w * scale) for x, y, w, _ in SLOTS_B]
+        holes = va.compute_holes(pd)[0]
+        first = va.align(design, holes, va.DEFAULTS, pd.scale, pd.nominal)
+        holes = va.compute_holes(pd, first.fit.theta)[0]
+        return pd, holes, va.align(design, holes, va.DEFAULTS, pd.scale, pd.nominal)
+
+    def assert_recovers(self, al, deg, t, tol, scale=1.0):
+        self.assertEqual(al.failures, [])
+        self.assertAlmostEqual(math.degrees(al.fit.theta), deg, delta=0.01)
+        for x, y, _, _ in SLOTS_B:
+            truth = T(deg, t[0] * scale, t[1] * scale, (x * scale, y * scale))
+            self.assertLess(math.dist(al.fit.point(x * scale, y * scale), truth), tol)
+
+    def test_two_half_slots_end_to_end(self):
+        deg, t = 1.2, (2.0, -1.5)
+        vm, m, ui, parks = slot_run(deg, t)
+        self.assertEqual(vm.ended, "END")
+        self.assertEqual(m.collisions, [])
+        self.assertLessEqual(vm.max_depth, 5)
+        self.assertLess(math.dist((m.x, m.y), parks[1][:2]), 0.002)       # backed out to where it was parked
+        self.assertEqual([c[0].split()[-1] for c in vm.shell], ["newsession", "align"])
+        pd, holes, al = self.fit(vm)
+        self.assertEqual(pd.open, {1: (1, -1), 2: (1, 1)})
+        for h, (_, _, w, _) in zip(holes, SLOTS_B):
+            self.assertAlmostEqual(h.dia, w, delta=0.012)           # trigger travel reads a little wide
+            self.assertLess(h.repeat, 0.0015)
+            self.assertGreater(h.wall_margin, 0.05)
+        self.assert_recovers(al, deg, t, 0.0015)
+        # and the whole alignment of a job, as the window would run it
+        data = os.path.join(self.tmp, "vd_probe_data.csv")
+        with open(data, "w") as fh:
+            fh.write(data_text(vm))
+        job = os.path.join(self.tmp, "sideB.sbp")
+        shutil.copy(JOB, job)
+        res = va.run_alignment(data, job, [sv[:3] for sv in SLOTS_B])
+        self.assertTrue(res.ok, res.report)
+        with open(res.out_path, encoding="latin-1") as fh:
+            sim_sbp.compare(JOB_TEXT, fh.read(), math.radians(deg), t[0], t[1], tol=0.003)
+
+    def test_turned_board(self):
+        for deg, t in ((-4.0, (1.0, 2.5)), (5.0, (-1.0, 0.5))):
+            vm, m, _, _ = slot_run(deg, t, park_err=((0.0, -0.08), (0.0, 0.08)))
+            self.assertEqual(m.collisions, [])
+            self.assert_recovers(self.fit(vm)[2], deg, t, 0.0015)
+
+    def test_parked_off_line_is_recentred_at_the_opening(self):
+        vm, m, _, _ = slot_run(1.0, (0.5, 0.5), park_err=((0.0, 0.12), (0.0, -0.12)))
+        self.assertEqual(m.collisions, [])
+        self.assert_recovers(self.fit(vm)[2], 1.0, (0.5, 0.5), 0.0015)
+
+    def test_metric_machine(self):
+        k = 25.4
+        deg, t = 0.7, (1.0, -0.5)
+        vm, m, _, _ = slot_run(deg, t, k=k, machine_kw=dict(units=1, pretravel=0.1, latency=0.012, jitter=0.005,
+                                                            overtravel=3.0, base_offset=(80.0, -40.0)))
+        self.assertEqual(vm.ended, "END")
+        self.assertEqual(m.collisions, [])
+        pd, _, al = self.fit(vm, k)
+        self.assertEqual(pd.units, 1)
+        self.assert_recovers(al, deg, t, 0.04, scale=k)
+
+    def test_spin180_cancels_stylus_runout(self):
+        deg, t = 0.5, (1.0, 1.0)
+        ecc = (0.004, -0.003)
+        vm, m, ui, _ = slot_run(deg, t, spin180=1, machine_kw=dict(ecc=ecc),
+                                on_spin=lambda mc: setattr(mc, "ecc", (-mc.ecc[0], -mc.ecc[1])))
+        self.assertEqual(m.collisions, [])
+        pd, holes, al = self.fit(vm)
+        self.assert_recovers(al, deg, t, 0.0015)
+
+    def test_slot_end_too_close_to_the_edge_aborts_and_backs_out(self):
+        short = [(0.1, 15.0, 0.625, (1, -1)), SLOTS_B[1]]
+        vm, m, ui, parks = slot_run(0.5, (1.0, 1.0), slots=short)
+        self.assertEqual(m.collisions, [])
+        self.assertTrue(any("too close to its opening" in msg for msg in ui.messages), ui.messages)
+        self.assertLess(math.dist((m.x, m.y), parks[0][:2]), 0.002)
+        with self.assertRaises(va.ProbeDataError):
+            va.parse_probe_data(data_text(vm))
+
+    def test_parked_in_the_bay_aborts_before_the_body_can_hit_anything(self):
+        # in the bay the probe body would reach the bay end wall before the ball does; the wall check at
+        # the opening stops first
+        # (a ball that straddles the bay floor still touches the slot walls' top edges - all at one height,
+        # so the centres stay right and only the width reads wide)
+        for h in (1.9, 1.7):                       # wholly above the bay floor (1.6)
+            vm, m, ui, parks = slot_run(0.5, (1.0, 1.0), h=h)
+            self.assertEqual(m.collisions, [], h)
+            self.assertTrue(any("No slot walls" in msg for msg in ui.messages), ui.messages)
+        self.assertLess(math.dist((m.x, m.y), parks[0][:2]), 0.002)
+
+    def test_without_a_bay_the_stylus_hits_the_slot_ceiling(self):
+        # the revision-2 mistake: a part-depth slot cannot be probed from above without a bay
+        vm, m, _, _ = slot_run(0.5, (1.0, 1.0), bays=False)
+        self.assertTrue(m.collisions)
+        self.assertIn(m.collisions[0][3][0], ("stem", "body"))
+
+    def test_bay_too_narrow_for_the_probe_body(self):
+        vm, m, _, _ = slot_run(0.5, (1.0, 1.0), tol=-0.2, bay_err=(0.0, 0.0))
+        self.assertTrue(m.collisions)
+        self.assertEqual(m.collisions[0][3][0], "body")
+
+    def test_simulation_never_moves_the_machine(self):
+        typed = [(x, y, w) for x, y, w, _ in SLOTS_B]
+        vm, m, _, _ = slot_run(0.0, (0.0, 0.0), sim=1, machine_kw=dict(mode=1),
+                               ui_kw=dict(sim_inputs=typed))
+        self.assertEqual(vm.ended, "END")
+        self.assertEqual(m.moves, 0)
+        pd = va.parse_probe_data(data_text(vm))
+        self.assertTrue(pd.sim)
+        for h, (x, y, _) in zip(va.compute_holes(pd)[0], typed):
+            self.assertAlmostEqual(h.center[0], x + 0.020, delta=1e-6)     # the routine's synthetic offset
+            self.assertAlmostEqual(h.center[1], y - 0.012, delta=1e-6)
+
+    def test_bad_open_code_is_refused_before_anything_moves(self):
+        vm, m, ui, _ = slot_run(0.0, (0.0, 0.0), open1=5)
+        self.assertEqual(m.moves, 0)
+        self.assertTrue(any("Settings problem" in msg for msg in ui.messages), ui.messages)
 
 
 # ---- rough fit: places only the bay cut file, from the two jogged slot openings ---------------------

@@ -13,6 +13,8 @@ Virtual Dowel aligns side-B jobs for flip milling on a ShopBot CNC router. ShopB
 
 The PC does the correction, not SB3. Nikolai does not trust SB3 to apply corrections live.
 
+**Scope: Virtual Dowel probes, checks, and aligns (rotates and shifts) the operator's own job files. It never makes toolpaths or cut files.** Rules for cuts become checks and pages in the guide.
+
 The software is proprietary. The repository is private. Every source file has a copyright line. Add the same line to every new file.
 
 ## 2. Commands
@@ -32,7 +34,7 @@ python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --ho
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (128 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (139 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -73,7 +75,7 @@ Data flow:
 
 Key functions in `vd_align.py`: `parse_probe_data`, `compute_holes`, `fit_rigid`, `align`, `hole_checks`, `mirror_alternatives`, `SbpTransformer`, `build_output`, `run_alignment`, `render_run`, `prepare_probing`, `install_paths`.
 
-Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python done (phase 1); routine, window and README not yet.
+Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1) and the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); window, README and guide not yet. Not run on the machine.
 
 Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_VDROUGH.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
 

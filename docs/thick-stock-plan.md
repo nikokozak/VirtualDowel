@@ -2,9 +2,9 @@
 
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
-Status: proposal, revision 5, 2026-10-04. No code for this is written yet.
+Status: revision 6, 2026-10-04. Phases 1 and 2 are built and tested in the simulator; nothing is confirmed on the machine.
 
-History: revision 2 added the probe and Z constraints and CNC-machined edges. Revision 3 corrected the slot depth (a part-depth slot has a ceiling on side B; Nikolai found the error). Revision 4 follows Nikolai's direction: assume no full-length bit, focus on the half-slot technique, keep the through slots and the edge mode as further options. Revision 5: the bays are made in Fusion; how the bay file is placed before anything can be probed (rough fit); probe sizes are settings. The key notch is optional (only for stock that does not match the stock box).
+History: revision 2 added the probe and Z constraints and CNC-machined edges. Revision 3 corrected the slot depth (a part-depth slot has a ceiling on side B; Nikolai found the error). Revision 4 follows Nikolai's direction: assume no full-length bit, focus on the half-slot technique, keep the through slots and the edge mode as further options. Revision 5: the bays are made in Fusion; how the bay file is placed before anything can be probed (rough fit); probe sizes are settings. The key notch is optional (only for stock that does not match the stock box). Revision 6: rules found while building the routine in the simulator (bay size, slot width and length, park height), the routine's safety steps, and Nikolai's scope rule: Virtual Dowel only probes, checks and aligns; it never makes toolpaths.
 
 ## 1. Problem and constraints
 
@@ -16,6 +16,8 @@ Constraints:
 - **The probe cannot go above the top of thick stock.** It always travels around the outside of the stock. It can only get into a feature from the side.
 - Z is set by the operator. A Z touch-off with the probe is possible but not exact.
 - Stock can be large and irregular, so the method must not need machined edges.
+
+**Scope (Nikolai, 2026-10-04): Virtual Dowel only probes, checks, and aligns files that Nikolai makes in Fusion. It never makes toolpaths or cut files.** Rules for the cuts become checks on his files and pages in the guide (section 11).
 
 ## 2. Modes and build order
 
@@ -38,7 +40,12 @@ Optional, only for stock that does not match the stock box at the slots (section
 
 1. **Rough locate (cutter in).** The operator jogs the bit tip over the two slot openings (and the key notch, if cut), which show on the edge faces. Virtual Dowel makes a rough fit from them (section 5).
 2. **Bay cut (cutter in).** Nikolai's bay file from Fusion (section 7) is moved with the rough fit, the same way as a part file, and written as `<file>_VDROUGH.sbp`. The operator previews it, zeroes Z, and runs it.
-3. **Probe (probe in).** The operator parks the probe ball outside each bay at the probing height. The routine moves in along the slot (guarded), touches the slot end, then both side walls, then the end again (fine passes).
+3. **Probe (probe in).** The operator parks the probe ball outside each slot opening, in line with the slot, at mid slot height below the bay floor. Then the routine (all moves guarded):
+   1. moves 0.6 in into the opening; nothing may be touched (else: stops, the slot is too short or the park is off-line);
+   2. checks that the slot walls are there and centres on them (else: stops, the ball is in the bay or not at the opening);
+   3. searches along the slot for the round end; it must be at least the back-off distance + 0.1 in further in (else: stops, the slot is too short);
+   4. backs off onto the straight part; one coarse and N fine passes of wall, wall, end;
+   5. backs out the way it came in.
 4. **Align and cut (cutter in)**, as in the hole mode.
 
 Compared with the hole mode, side B has one more tool change (cutter, probe, cutter) and one short cut.
@@ -70,11 +77,17 @@ So the 0.3 in bay oversize needs the real edge within about 0.15 in of the box a
 
 **Irregular stock: add the key notch.** Where the real edge is not near the box, an opening only shows where the slot axis is, not where along it the slot is. The key notch, on an edge at right angles to the flip axis, gives that missing position. Virtual Dowel then puts each of the three jogged points on its design axis line (rotation, X, Y). Simulation (`docs/rough_fit_sim.py`): 0.1 in jog error and real edges up to 1 in inside the box give at most 0.19 in at the slot ends.
 
-**The bay size covers the rough error:**
+**Sizes** (found while building the routine in the simulator; the window will compute them from the probe settings):
 
-- width = the larger of the probe body diameter and the slot width, plus 2 x 0.3 in;
-- from outside the stock box to the slot end + 0.3 in along the axis;
-- depth = to 0.15 in below the top of the side-A slot.
+- The probe body follows the ball. If the body is below the stock top while probing (free stylus length shorter than stock top minus the probing height), it is inside the bay, so the bay must leave room for it beside every wall touch and at the round end. Use the stylus stem radius instead of the body radius when the body stays above the stock top.
+- **Bay half-width** at least rho_max + body radius + 0.4 in, where rho_max = (widest slot width - ball diameter) / 2. The 0.4 in covers the rough-fit error (up to 0.2 in) and the wall check's sideways search at the opening.
+- **Bay length:** from outside the stock box to past the round end by rho_max + body radius + 0.4 in.
+- **Bay depth:** to 0.15 in below the top of the side-A slot.
+- **Slot width** at least ball diameter + 2 x (end-search length x tan 5 deg + 0.1 in): the end search runs along a machine axis, so on a board turned 5 deg it drifts sideways about 0.17 in over 2 in. About 0.6 in for a 1/8 in ball.
+- **Slot length:** the round end at least 0.75 in inside the real stock edge.
+- **Probing height:** the ball below the bay floor by at least its radius; the probe body bottom above the bay floor.
+
+For example, with a 1/8 in ball, a 0.8 in body below the stock top and slots of 0.625 and 0.75 in: bay about 2.3 in wide, reaching about 1.1 in past the round end.
 
 The bay must be open to the outside edge. A closed pocket, round or not, does not work, because the probe cannot come down into it from above. An open bay also lets every plunge happen in the air outside the stock.
 
@@ -97,7 +110,10 @@ The bay must be open to the outside edge. A closed pocket, round or not, does no
 
 ## 7. The bay cut file (made in Fusion)
 
-Nikolai makes the bays in Fusion, as a Setup 2 operation or as their own file, posted with his ShopBot post. So the cutter, feeds, Z and the post's conventions are his. Virtual Dowel only moves the file (section 5), with the existing rewriter and its rules.
+Nikolai makes the bays in Fusion, as a Setup 2 operation or as their own file, posted with his ShopBot post. So the cutter, feeds, Z and the post's conventions are his. Virtual Dowel only moves the file (section 5), with the existing rewriter and its rules, and checks it:
+
+- done: every cut is within `bay_reach` of a slot (a part file is refused);
+- planned: the cuts cover the bay size of section 5 around each slot (needs the bay cutter diameter, entered in the window, because the post does not write it).
 
 Rules for the bay operation (in the README):
 
@@ -118,6 +134,8 @@ Rules for the bay operation (in the README):
 | Part file chosen as the bay file | Part cut with the rough fit | Refused: the bay file's toolpaths must stay near the slots. Output named `_VDROUGH`. |
 | Real edge farther from the box than about 0.15 in, and no key notch | Bay misses the slot end | The window shows the jogged points on a drawing of the design and the expected error. The precise probing finds no slot end and stops (guarded). Use the key notch for such stock. |
 | X/Y zero changed between rough locate, bay cut and probing | Bays in the wrong place | The bay file has the runtime zero check; the precise probing measures again anyway. |
+| Ball parked too high, in the bay | The probe body reaches the bay end wall before the ball touches anything; the stylus does not deflect, so the move would not stop | The routine checks for the slot walls at the opening first, with a search short enough that the body cannot reach the bay sides, and stops (simulator test). |
+| Slot too short | Wall touches on the edge corners give a wrong width without any visible error | The routine stops if the round end is too close to the opening (simulator test). |
 | FP of the bay file from inside a running file is not confirmed on SB3 | Extra step | Use C80 for each step (the window opens at the current step), as now. |
 
 ## 9. Through-slot mode (full-length bit, too little Z travel)
@@ -257,7 +275,8 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 2. **Rough locate** is a short run mode of `vd_probe.sbp`: keypad at each opening, record `%(1)`/`%(2)` and `%(6)`/`%(7)`, write the data, start the window.
 3. **Rough fit:** the existing two-point rigid fit for the normal case; the three-line fit when a key notch is cut (an option in the window, built in phase 3). The bay-file check is new; moving the bay file uses the existing rewriter and runtime header.
 4. **Window steps.** The session records the step (rough locate, bay cut, probe, align). C80 opens the window at the current step, and each Start writes `vd_run.sbp` for that step, as now.
-5. **Simulator.** `tests/sbp_vm.py` gets stock with half-depth slots and bays, and a collision check for the stylus and the probe body, not only the ball. That check would have caught the revision-2 slot error.
+5. **Simulator.** `tests/sbp_vm.py` has stock with half-depth slots and bays (`SlotStock`), and checks the stylus stem, the probe body and the collet nut for collisions, not only the ball. It found the bay-size, slot-width and parked-in-the-bay problems above, and it shows the revision-2 slot error (a test).
+6. **Guide (Nikolai's request).** `docs/guide.html`, shipped with the app: a styled page with annotated drawings of how to set up the side-A slots and the side-B bays in Fusion (WCS, flip axis, sizes from the probe settings) and how the probing works, step by step. The window's *Guide* button opens it (standard-library `webbrowser`); the README links to it.
 
 **Phases** (each ends with all tests passing; nothing is "works on the machine" until Nikolai confirms it):
 
@@ -265,10 +284,10 @@ Defaults (to confirm): park about 0.3 in from both edges, `inset` 1.0 in, search
 |---|---|---|
 | 0 | v2.0 review fixes (section 13). Items 1-4 done in v2.0.1; the others wait for a decision. | a test per fix |
 | 1 (done) | Python: open-side centre calculation, correction for a turned slot, open-side and stock-box checks; rough fit and bay-file check (moved here from phase 3) | synthetic touches; side-A -> flip -> side-B registration test |
-| 2 | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
+| 2 (done) | Routine: half-slot probing; VM stock with slots, bays and stylus/body collisions | VM runs: both slots, turned board, mm machine, spin-180, end too close to the edge, bay too narrow, chips (false touch) |
 | 3 | Rough locate run in `vd_probe.sbp`; optional key notch (three-line fit); SHELL word for the rough fit | VM run of the rough locate; three-line fit from noisy jogs (as in `docs/rough_fit_sim.py`); lint |
-| 4 | Window: mode switch (holes, half slots, through slots), slot entry, cutter settings, steps, bay drawing | window tests |
-| 5 | README operator section and machine tests | below |
+| 4 | Window: mode switch (holes, half slots, through slots), slot entry, probe sizes, computed bay and slot sizes, steps, drawing, Guide button, bay coverage check | window tests |
+| 5 | README operator section, `docs/guide.html`, machine tests | below |
 | 6 | Edge mode | section 10 |
 
 **Machine tests:**

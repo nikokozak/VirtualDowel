@@ -1,8 +1,9 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.0  (2026-10-02)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.1  (2026-10-04)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
-' Finds the centers of two or more reference through-holes with the
+' Finds the centers of two or more reference through-holes - or half slots
+' at the stock edges for thick stock - with the
 ' ShopBot digitizing probe and writes the raw touch data for
 ' vd_align.py, which then rotates and shifts the side-B job file so it
 ' lines up with the holes.
@@ -41,6 +42,13 @@
 &vd_calref = 0       'calibration - measured diameter of the reference hole
 &vd_launched = 0     '1 = written by the Virtual Dowel window - it has already removed old aligned files
 &vd_after = "align"  'what the window shows when probing is done - align or calresult
+&vd_open1 = 0        'half slots - 0 = round hole - 1 to 4 = slot opening toward -X +X -Y +Y
+&vd_open2 = 0
+&vd_open3 = 0
+&vd_open4 = 0
+&vd_open5 = 0
+&vd_open6 = 0
+&vd_slen = 2.5       'half slots - search this far in from where you park outside the opening
 'data file written by this routine - and the Python and script it starts afterwards.
 'vd_install.bat sets all three. The data file must stay next to vd_align.py - the script reads it there.
 'SB3 cannot start a .bat file with SHELL - so it starts python.exe directly.
@@ -70,6 +78,22 @@ IF &vd_units = 1 THEN &vd_u = 25.4
 &vd_r = (&vd_hole - &vd_tip) / 2
 &vd_maxd = &vd_r + &vd_margin
 &vd_slowd = 2 * &vd_backoff + 0.02 * &vd_u
+&vd_slen = &vd_slen * &vd_u
+'half slots - after finding the round end back off this far - the wall touches are made on the straight part
+&vd_back = &vd_r + 0.08 * &vd_u
+'half slots - first move in from the park point - then the slot walls are checked there
+&vd_sentry = 0.6 * &vd_u
+'half slots - the wall check at the opening searches only a little past the widest slot - so in a bay
+'the probe body cannot reach the bay walls - the bay is wider by the body radius plus 0.4 inch
+&vd_sopen = &vd_r + 0.15 * &vd_u
+'half slots - the first wall search inside covers the whole slot width - the probe may start off its centre line
+&vd_swide = 2 * &vd_r + &vd_margin
+&vd_neg = -1
+&vd_nslot = 0
+&vd_hw = 0
+&vd_ed = 0
+&vd_limc = 0
+&vd_lime = 0
 &vd_inhole = 0
 &vd_hit = 0
 &vd_xc = 0
@@ -87,6 +111,18 @@ IF &vd_passes < 1 THEN GOTO vd_err_cfg
 IF &vd_r < 0.02 * &vd_u THEN GOTO vd_err_cfg
 IF &vd_pin < 1 THEN GOTO vd_err_cfg
 IF &vd_pin > 8 THEN GOTO vd_err_cfg
+'half slots - every open code must be a whole number 0 to 4
+&vd_h = 0
+vd_cfg_slot:
+&vd_h = &vd_h + 1
+IF &vd_h > 6 THEN GOTO vd_cfg_slot_ok
+GOSUB vd_slot_cfg
+IF &vd_oc < 0 THEN GOTO vd_err_cfg
+&vd_bad = &vd_oc * (1 - &vd_ix * &vd_ix - &vd_iy * &vd_iy)
+IF &vd_bad > 0 THEN GOTO vd_err_cfg
+&vd_nslot = &vd_nslot + &vd_ix * &vd_ix + &vd_iy * &vd_iy
+GOTO vd_cfg_slot
+vd_cfg_slot_ok:
 IF &vd_sim = 1 THEN GOTO vd_mode_ok
 IF &vd_mode = 1 THEN GOTO vd_err_preview
 vd_mode_ok:
@@ -212,6 +248,8 @@ vd_hw_done:
 vd_next_hole:
 &vd_h = &vd_h + 1
 IF &vd_h > &vd_nholes THEN GOTO vd_all_done
+GOSUB vd_slot_cfg
+IF &vd_oc > 0 THEN GOTO vd_next_slot
 GOSUB vd_locate
 GOSUB vd_probe_hole
 IF &vd_spin180 = 0 THEN GOTO vd_next_hole
@@ -220,6 +258,14 @@ MSGBOX(Now turn the spindle by hand about 180 degrees - spindle OFF. The probe i
 &vd_x0 = &vd_xc
 &vd_y0 = &vd_yc
 GOSUB vd_probe_hole
+GOTO vd_next_hole
+vd_next_slot:
+GOSUB vd_locate_slot
+GOSUB vd_probe_slot
+IF &vd_spin180 = 0 THEN GOTO vd_next_hole
+MSGBOX(Now turn the spindle by hand about 180 degrees - spindle OFF. The probe is back outside the slot. Click OK when done.,0,Virtual Dowel)
+&vd_or = 1 - &vd_or
+GOSUB vd_probe_slot
 GOTO vd_next_hole
 '
 vd_all_done:
@@ -236,7 +282,7 @@ vd_end:
 END
 '
 '=====================================================================
-' SUBROUTINES   (deepest GOSUB nesting is 5 - including the input handler)
+' SUBROUTINES   (deepest GOSUB nesting is 5 - including the input handler - for holes and half slots)
 '=====================================================================
 '
 '---- let the operator park the probe over the next hole ----
@@ -425,8 +471,167 @@ IF &vd_d < 0 THEN GOTO vd_touch_ret
 &vd_cby = %(7)
 &vd_px = &vd_cx
 &vd_py = &vd_cy
+&vd_trav = &vd_d
 &vd_hit = 1
 vd_touch_ret:
+RETURN
+'
+'---- half slots: which reference &vd_h is - and its directions ----
+' out: &vd_oc 0 = round hole - 1 to 4 = opens toward -X +X -Y +Y
+'      &vd_ix &vd_iy = unit vector INTO the slot - &vd_sao = slot axis 1=X 2=Y - &vd_sac = across axis
+'      &vd_sin = inward sign along the slot axis - &vd_sos = open sign
+vd_slot_cfg:
+&vd_oc = 0
+IF &vd_h = 1 THEN &vd_oc = &vd_open1
+IF &vd_h = 2 THEN &vd_oc = &vd_open2
+IF &vd_h = 3 THEN &vd_oc = &vd_open3
+IF &vd_h = 4 THEN &vd_oc = &vd_open4
+IF &vd_h = 5 THEN &vd_oc = &vd_open5
+IF &vd_h = 6 THEN &vd_oc = &vd_open6
+&vd_ix = 0
+&vd_iy = 0
+IF &vd_oc = 1 THEN &vd_ix = 1
+IF &vd_oc = 2 THEN &vd_ix = &vd_neg
+IF &vd_oc = 3 THEN &vd_iy = 1
+IF &vd_oc = 4 THEN &vd_iy = &vd_neg
+&vd_sao = 1 + &vd_iy * &vd_iy
+&vd_sac = 3 - &vd_sao
+&vd_sin = &vd_ix + &vd_iy
+&vd_sos = 0 - &vd_sin
+RETURN
+'
+'---- half slots: let the operator park the probe outside the next slot opening ----
+vd_locate_slot:
+IF &vd_sim = 1 THEN GOTO vd_locate_slot_sim
+PRINT "Virtual Dowel - slot "; &vd_h; " of "; &vd_nholes
+MSGBOX(Jog the probe ball OUTSIDE the next slot opening - in line with the slot - 0.3 inch or 8 mm out from the edge - at mid slot height below the bay floor. Use slow keypad speed. Press ESC when done.,64,Virtual Dowel)
+SK
+MSGBOX(Is the probe ball outside the slot opening - in line with the slot and below the bay floor? Yes to probe it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
+IF &msganswer = "No" THEN GOTO vd_locate_slot
+IF &msganswer = "Cancel" THEN GOTO vd_abort
+&vd_x0 = %(1)
+&vd_y0 = %(2)
+&vd_z0 = %(3)
+RETURN
+vd_locate_slot_sim:
+INPUT "SIMULATION - type X then Y then width of the round end of this slot with commas between them" &vd_sx, &vd_sy, &vd_sd
+'synthetic slot - true center deliberately offset from what was typed - parked 1 inch outside it
+&vd_shx = &vd_sx + 0.020 * &vd_u
+&vd_shy = &vd_sy - 0.012 * &vd_u
+&vd_rs = (&vd_sd - &vd_tip) / 2
+&vd_x0 = &vd_sx - &vd_ix * &vd_u
+&vd_y0 = &vd_sy - &vd_iy * &vd_u
+&vd_z0 = %(3)
+RETURN
+'
+'---- probe one half slot: find the round end from outside - coarse pass - fine passes - back out ----
+vd_probe_slot:
+WRITE #1; "O,"; &vd_h; ","; &vd_sao; ","; &vd_sos
+&vd_mx = &vd_x0
+&vd_my = &vd_y0
+GOSUB vd_moveto
+&vd_xc = &vd_x0
+&vd_yc = &vd_y0
+&vd_inhole = 2
+&vd_spd = &vd_fast
+'move a little way into the opening - nothing may be touched yet
+&vd_ax = &vd_sao
+&vd_sg = &vd_sin
+&vd_dist = &vd_sentry
+GOSUB vd_touch
+IF &vd_hit = 1 THEN GOTO vd_err_open
+'no contact - so the move ran to its end - vd_touch leaves the position variables unchanged then
+&vd_px = &vd_tx
+&vd_py = &vd_ty
+'the slot walls must be there - else the ball is in the bay or not at the opening - then centre on them
+&vd_xc = &vd_px
+&vd_yc = &vd_py
+&vd_ax = &vd_sac
+&vd_sg = 1
+&vd_dist = &vd_sopen
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_nowalls
+&vd_p1 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_sg = -1
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_nowalls
+&vd_p2 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+&vd_mid = (&vd_p1 + &vd_p2) / 2
+&vd_xc = &vd_xc + (&vd_mid - &vd_xc) * (2 - &vd_sac)
+&vd_yc = &vd_yc + (&vd_mid - &vd_yc) * (&vd_sac - 1)
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+'find the round end - a guarded move in along the slot from the centre of the opening
+&vd_ax = &vd_sao
+&vd_sg = &vd_sin
+&vd_dist = &vd_slen
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_miss
+'the wall touches go a back-off distance before the end - that must still be inside the slot
+IF &vd_trav < &vd_back + 0.1 * &vd_u THEN GOTO vd_err_short
+'back off onto the straight part of the slot - the wall touches are made there
+&vd_xc = &vd_cx - &vd_ix * &vd_back
+&vd_yc = &vd_cy - &vd_iy * &vd_back
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_limc = &vd_swide
+&vd_lime = &vd_back + &vd_margin
+&vd_ps = 0
+GOSUB vd_slot_pass
+'from now on search only a margin past what THIS slot measured
+&vd_limc = &vd_hw + &vd_margin
+&vd_lime = &vd_ed + &vd_margin
+&vd_ps = 1
+vd_slot_fine:
+IF &vd_ps > &vd_passes THEN GOTO vd_slot_done
+GOSUB vd_slot_pass
+&vd_ps = &vd_ps + 1
+GOTO vd_slot_fine
+vd_slot_done:
+WRITE #1; "H,"; &vd_h; ","; &vd_or; ","; &vd_xc; ","; &vd_yc; ","; &vd_z0
+GOSUB vd_slot_out
+RETURN
+'
+'---- one pass on a half slot: both walls across it - then the round end from the walls midpoint ----
+vd_slot_pass:
+&vd_lim = &vd_limc
+&vd_ax = &vd_sac
+&vd_sg = 1
+GOSUB vd_touch_rec
+&vd_p1 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+&vd_sg = -1
+GOSUB vd_touch_rec
+&vd_p2 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+&vd_hw = (&vd_p1 - &vd_p2) / 2
+&vd_mid = (&vd_p1 + &vd_p2) / 2
+&vd_xc = &vd_xc + (&vd_mid - &vd_xc) * (2 - &vd_sac)
+&vd_yc = &vd_yc + (&vd_mid - &vd_yc) * (&vd_sac - 1)
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_lim = &vd_lime
+&vd_ax = &vd_sao
+&vd_sg = &vd_sin
+GOSUB vd_touch_rec
+&vd_ed = (&vd_cx - &vd_xc) * &vd_ix + (&vd_cy - &vd_yc) * &vd_iy
+RETURN
+'
+'---- back out of a half slot to where the operator parked - the way it came in ----
+vd_slot_out:
+IF &vd_sim = 1 THEN GOTO vd_slot_out_done
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_mx = &vd_x0
+&vd_my = &vd_y0
+GOSUB vd_moveto
+vd_slot_out_done:
+&vd_inhole = 0
 RETURN
 '
 '---- input interrupt handler: motion has already stopped ----
@@ -457,7 +662,16 @@ RETURN
 ' ERRORS
 '=====================================================================
 vd_err_miss:
-MSGBOX(No contact within the search distance. Park closer to the hole center - and check the vd_hole setting and that the probe triggers. Probing aborted.,16,Virtual Dowel)
+MSGBOX(No contact within the search distance. Park closer to the hole center - or in line with the half slot below the bay floor. Check the vd_hole setting and that the probe triggers. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_open:
+MSGBOX(The probe touched something right at the slot opening. Park in line with the slot and 0.3 inch or 8 mm out from the edge. The slot may be too short. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_short:
+MSGBOX(The slot end is too close to its opening. The round end must be at least 0.75 inch or 19 mm inside the edge. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_nowalls:
+MSGBOX(No slot walls at the opening. Park the ball 0.3 inch or 8 mm out from the edge - in line with the slot - at mid slot height below the bay floor. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_err_pretrig:
 MSGBOX(The probe reads DEFLECTED before a move. Probing aborted.,16,Virtual Dowel)
@@ -470,7 +684,13 @@ IF &vd_sim = 1 THEN GOTO vd_abort
 IF &vd_inhole = 0 THEN GOTO vd_abort
 MS, &vd_fast, &vd_zspd
 M2, &vd_xc, &vd_yc
+IF &vd_inhole = 2 THEN GOTO vd_slot_abort
 MZ, &vd_z0
+&vd_inhole = 0
+GOTO vd_abort
+vd_slot_abort:
+'a half slot - back out the way the probe came in
+M2, &vd_x0, &vd_y0
 &vd_inhole = 0
 GOTO vd_abort
 vd_abort:
