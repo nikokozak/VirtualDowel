@@ -32,7 +32,7 @@ python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --ho
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (113 tests at v2.0.1). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (128 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -73,7 +73,9 @@ Data flow:
 
 Key functions in `vd_align.py`: `parse_probe_data`, `compute_holes`, `fit_rigid`, `align`, `hole_checks`, `mirror_alternatives`, `SbpTransformer`, `build_output`, `run_alignment`, `render_run`, `prepare_probing`, `install_paths`.
 
-Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
+Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python done (phase 1); routine, window and README not yet.
+
+Generated files (never commit; already in `.gitignore`): `venv/`, `vd_start.sbp`, `vd_run.sbp`, `vd_state.json`, `vd_machine.json`, `vd_settings.json`, `vd_probe_data.csv`, `vd_cal_data.csv`, `vd_launch.log`, `*_VD.sbp`, `*_VDSIM.sbp`, `*_VDROUGH.sbp`, `*_report.txt`, `*.vdholes.txt`, `vd_selftest_*.txt`.
 
 ## 5. Hard SB3 constraints (confirmed on the real machine)
 
@@ -129,8 +131,11 @@ CAL,<reference diameter>      calibration only (then nholes may be 1)
 DET,<pin>,<deflected state>   input detection only
 T,hole,orient,pass,axis,sign,x,y,z,bx,by    one per touch; pass 0 = coarse; bx/by = %(6)/%(7)
 H,hole,orient,xc,yc,zp        routine's running estimate (not used)
+O,hole,axis,sign              half slot: the hole opens toward (axis, sign); no touch is made that way
 END,<nholes>                  no END = aborted run
 ```
+
+Rough locate data (half-slot mode, side B, before the bay cut): `VR,1,units,sim,n,mode`, `DT,...`, one `R,i,x,y,bx,by` per jogged slot opening (in the listed slot order), `END,n`.
 
 - Sidecar `<job>.sbp.vdholes.txt`: `holeN = x, y, d` lines and an optional `stock = xmin, ymin, xmax, ymax`.
 - `vd_state.json`: `outputs` (`[{path, data_id}]`), `session` (`{kind: probe|cal, jobs, holes, stock, sim, prepared, keep}`), `last_dir`.
