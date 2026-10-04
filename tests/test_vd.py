@@ -1713,6 +1713,81 @@ class TestSlotRoutine(unittest.TestCase):
         self.assertTrue(any("Settings problem" in msg for msg in ui.messages), ui.messages)
 
 
+# ---- size calculator for the Fusion slots and bays (nothing is read from job files) ----------------
+SIZES = dict(ball=0.125, stem=0.08, free=1.0, body=0.8, length=3.0, thick=3.0, slot_depth=1.75,
+             widths=[0.625, 0.75], slot_length=1.25)
+
+
+class TestSizeCalculator(unittest.TestCase):
+
+    def test_example_is_ok_and_matches_the_simulated_bay(self):
+        r = va.slot_bay_sizes(**SIZES)
+        self.assertTrue(r.ok, r.problems)
+        self.assertAlmostEqual(r.bay_floor, 1.6)
+        self.assertTrue(r.body_in_bay)
+        self.assertAlmostEqual(r.min_bay_width, 2 * (0.3125 + 0.4 + 0.4))
+        self.assertAlmostEqual(r.min_bay_reach, 0.3125 + 0.4 + 0.4)
+        self.assertAlmostEqual(r.bay_depth, 1.4)
+        # the same bay the simulator probes without a collision (TestSlotRoutine)
+        x0, y0, x1, y1 = bay_box((0.0, 0.0, 0.625, (1, -1)), far=0.0)
+        self.assertAlmostEqual((y1 - y0), r.min_bay_width)
+        self.assertAlmostEqual(x1, r.min_bay_reach)
+        self.assertLess(r.park_lo, 0.8)                         # the simulator parks at 0.8
+        self.assertGreater(r.park_hi, 0.8)
+        self.assertIn("OK", r.text())
+
+    def test_the_simulator_agrees_at_the_limits(self):
+        # minimum bay, the worst rough-fit error toward the body, both ends of the park band: no collision
+        r = va.slot_bay_sizes(**SIZES)
+        for h in (r.park_lo + 0.01, r.park_hi - 0.01):
+            for err in ((0.2, 0.0), (0.0, 0.2), (0.0, -0.2)):
+                vm, m, ui, _ = slot_run(1.0, (0.5, 0.5), h=h, bay_err=err)
+                self.assertEqual(m.collisions, [], (h, err))
+                self.assertEqual(vm.ended, "END")
+                self.assertFalse(any("aborted" in msg for msg in ui.messages), (h, err, ui.messages))
+
+    def test_a_body_that_stays_above_the_stock_needs_only_room_for_the_stem(self):
+        r = va.slot_bay_sizes(**dict(SIZES, free=2.0, length=4.5))
+        self.assertTrue(r.ok, r.problems)
+        self.assertFalse(r.body_in_bay)
+        self.assertAlmostEqual(r.min_bay_width, 2 * (0.3125 + 0.04 + 0.4))
+        self.assertGreaterEqual(r.park_lo + 2.0, 3.0)          # body bottom above the top in the whole band
+
+    def test_problems_are_named(self):
+        cases = [
+            (dict(free=0.1), "body would go into the slot"),
+            (dict(length=1.4), "collet nut"),
+            (dict(widths=[0.5, 0.75]), "slot 1 is narrower"),
+            (dict(widths=[0.7, 0.75]), "differ by"),
+            (dict(slot_length=0.8), "too short"),
+            (dict(slot_length=2.6), "end-search length"),
+            (dict(bay_width=1.8), "bay is narrower"),
+            (dict(bay_reach=0.9), "does not reach"),
+            (dict(slot_depth=3.2), "deeper than the stock"),
+        ]
+        for change, words in cases:
+            r = va.slot_bay_sizes(**dict(SIZES, **change))
+            self.assertFalse(r.ok, change)
+            self.assertTrue(any(words in pr for pr in r.problems), (change, r.problems))
+            self.assertIn("NOT OK", r.text())
+
+    def test_mm(self):
+        k = 25.4
+        mm = {n: ([w * k for w in v] if n == "widths" else v * k) for n, v in SIZES.items()}
+        r = va.slot_bay_sizes(**mm, mm=True)
+        self.assertTrue(r.ok, r.problems)
+        self.assertAlmostEqual(r.min_bay_width, va.slot_bay_sizes(**SIZES).min_bay_width * k, places=6)
+        self.assertIn(" mm", r.text())
+
+    def test_command_line(self):
+        rc = va.main(["sizes", "--ball", "0.125", "--stem", "0.08", "--free", "1", "--body", "0.8", "--length", "3",
+                      "--thick", "3", "--slot-depth", "1.75", "--widths", "0.625,0.75", "--slot-length", "1.25"])
+        self.assertEqual(rc, 0)
+        rc = va.main(["sizes", "--ball", "0.125", "--stem", "0.08", "--free", "1", "--body", "0.8", "--length", "3",
+                      "--thick", "3", "--slot-depth", "1.75", "--widths", "0.5,0.75", "--nogui"])
+        self.assertEqual(rc, 1)
+
+
 # ---- rough fit: places only the bay cut file, from the two jogged slot openings ---------------------
 BAY_TEXT = """'bay cut for the half slots (Fusion style, side B coordinates)
 SA

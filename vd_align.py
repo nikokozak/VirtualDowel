@@ -2417,6 +2417,158 @@ def align_batch(data_path: str, jobs: Sequence[str], design: List[DesignHole], s
 
 
 @dataclass
+class SlotSizes:
+    """Half-slot mode: what the Fusion slots and bays need for this probe and stock (slot_bay_sizes)."""
+    ok: bool
+    problems: List[str]
+    unit: str
+    bay_floor: float          # height of the bay floor above the spoilboard, on side B
+    park_lo: float            # park the ball centre between these heights above the spoilboard
+    park_hi: float
+    body_in_bay: bool         # the probe body is below the stock top while probing: the bays must fit it
+    min_slot_width: float
+    min_slot_length: float    # nominal length from the edge to the round-end centre
+    min_bay_width: float
+    min_bay_reach: float      # how far the bay must reach past the round-end centre (the slot's reference point)
+    bay_depth: float          # below the top surface
+    search_needed: float      # end-search length (&vd_slen) the routine needs
+    lines: List[str] = field(default_factory=list)
+
+    def text(self) -> str:
+        head = f"HALF-SLOT SIZES  -  {'OK' if self.ok else 'NOT OK'}"
+        out = [head, ""] + self.lines
+        if self.problems:
+            out += ["", "PROBLEMS:"] + ["  - " + p for p in self.problems]
+        return "\n".join(out)
+
+
+def slot_bay_sizes(ball: float, stem: float, free: float, body: float, length: float, thick: float,
+                   slot_depth: float, widths: Sequence[float], slot_length: Optional[float] = None,
+                   edge_tol: Optional[float] = None, overlap: Optional[float] = None,
+                   search: Optional[float] = None, max_rot: float = 5.0,
+                   bay_width: Optional[float] = None, bay_reach: Optional[float] = None,
+                   mm: bool = False) -> SlotSizes:
+    """The sizes the side-A slots and side-B bays need for this probe and stock, and whether the planned
+    ones are big enough. Nothing is read from the job files. The rules are the ones the routine and the
+    simulator use (docs/thick-stock-plan.md section 5). Values in inches, or all in mm with mm=True.
+
+    ball, stem, body: diameters. free: ball centre to where the probe body gets wider. length: ball
+    centre to the bottom of the collet nut. thick: stock thickness. slot_depth: side-A slot depth from
+    face A. slot_length: planned distance from the edge to the round-end centre; edge_tol: how far the
+    real edge may be from the stock box there (side-A zero, stock size). overlap: how far the bay goes
+    into the side-A slot. search: the routine's end-search length (&vd_slen). max_rot: board rotation.
+    Defaults: slot_length 1.25 in, edge_tol 0.15 in, overlap 0.15 in, search 2.5 in (scaled for mm)."""
+    k = 25.4 if mm else 1.0
+    slot_length = 1.25 * k if slot_length is None else slot_length
+    edge_tol = 0.15 * k if edge_tol is None else edge_tol
+    overlap = 0.15 * k if overlap is None else overlap
+    search = 2.5 * k if search is None else search
+    u = "mm" if mm else "in"
+    m = 0.05 * k                              # height margins
+    tan = math.tan(math.radians(max_rot))
+    problems: List[str] = []
+    if slot_depth >= thick:
+        problems.append("the side-A slot is as deep as or deeper than the stock - that is a through slot (no bay needed)")
+    floor = slot_depth - overlap
+    hi = floor - ball / 2 - m                 # ball wholly below the bay floor
+    lo = max(ball / 2 + m,                    # above the spoilboard
+             floor - free + m,                # the body bottom above the bay floor (never in the slot)
+             thick - length + m)              # the collet nut above the stock top
+    body_in_bay = True
+    if thick - free + m <= hi:                # the body can stay above the stock top: the bays only fit the stem
+        lo = max(lo, thick - free + m)
+        body_in_bay = False
+    if floor - free + m > hi:
+        problems.append("the probe body would go into the slot: the free stylus is too short for this slot depth "
+                        "(make the side-A slots deeper or use a longer stylus)")
+    elif thick - length + m > hi:
+        problems.append("the collet nut would come down onto the stock top: the probe is too short to reach into "
+                        "the slot (make the side-A slots deeper or use a longer probe)")
+    rho_max = (max(widths) - ball) / 2
+    rho_min = (min(widths) - ball) / 2
+    half = rho_max + (body / 2 if body_in_bay else stem / 2) + 0.4 * k
+    l_max = slot_length + edge_tol
+    # the end search runs along a machine axis: on a turned board it drifts sideways over the slot length
+    min_w = ball + (2 * tan * (l_max - 0.1 * k) + 0.2 * k) / (1 - tan)
+    for i, w in enumerate(widths, 1):
+        if w < min_w - 1e-9:
+            problems.append(f"slot {i} is narrower ({w:g}) than {min_w:.3f} {u}: on a board turned "
+                            f"{max_rot:g} deg the end search would touch its wall")
+    ws = sorted(widths)
+    if any(b - a < 0.1 * k - 1e-9 for a, b in zip(ws, ws[1:])):
+        problems.append(f"the slot widths must differ by at least {0.1 * k:g} {u}, so a wrong flip is caught")
+    min_len = max(0.75 * k, 0.58 * k + rho_max - rho_min) + edge_tol
+    if slot_length < min_len - 1e-9:
+        problems.append(f"the slots are too short: the round-end centre must be at least {min_len:.3f} {u} in from "
+                        f"the stock-box edge ({min_len - edge_tol:.3f} plus the edge tolerance)")
+    need = l_max + rho_max
+    if need > search + 1e-9:
+        problems.append(f"the slots are longer than the end-search length reaches: set the end-search length "
+                        f"(&vd_slen) to at least {need:.3f} {u}")
+    if bay_width is not None and bay_width < 2 * half - 1e-9:
+        problems.append(f"the bay is narrower ({bay_width:g}) than {2 * half:.3f} {u}: the probe "
+                        f"{'body' if body_in_bay else 'stylus'} would touch its side")
+    if bay_reach is not None and bay_reach < half - 1e-9:
+        problems.append(f"the bay does not reach far enough past the round-end centre ({bay_reach:g}; needs "
+                        f"{half:.3f} {u}): the probe {'body' if body_in_bay else 'stylus'} would touch its end")
+    f = lambda v: f"{v:.3f}"                  # noqa: E731
+    planned = lambda v: f"   planned {v:g}" if v is not None else ""  # noqa: E731
+    lines = [
+        f"Probe: ball {ball:g}  stem {stem:g}  free stylus {free:g}  body {body:g}  nut to ball {length:g} {u}",
+        f"Stock {thick:g} {u}; side-A slots {slot_depth:g} deep from face A; bays go {overlap:g} into them",
+        "",
+        f"Bay floor           {f(floor)} {u} above the spoilboard (side B)",
+        f"Park the ball       between {f(lo)} and {f(hi)} {u} above the spoilboard - about {f((lo + hi) / 2)}",
+        "Probe body          " + ("below the stock top while probing - the bays must fit the body" if body_in_bay
+                                  else "stays above the stock top - the bays only fit the stylus"),
+        f"Slot width          at least {f(min_w)} {u}   planned " + ", ".join(f"{w:g}" for w in widths),
+        f"Slot length         round-end centre at least {f(min_len)} {u} inside the stock-box edge   "
+        f"planned {slot_length:g}",
+        f"Bay width           at least {f(2 * half)} {u}{planned(bay_width)}",
+        f"Bay reach           at least {f(half)} {u} past the round-end centre{planned(bay_reach)}",
+        f"Bay depth           {f(thick - floor)} {u} below the top surface",
+        f"End-search length   needs {f(need)} {u} - setting {search:g}",
+    ]
+    return SlotSizes(ok=not problems, problems=problems, unit=u, bay_floor=floor, park_lo=lo, park_hi=hi,
+                     body_in_bay=body_in_bay, min_slot_width=min_w, min_slot_length=min_len,
+                     min_bay_width=2 * half, min_bay_reach=half, bay_depth=thick - floor, search_needed=need,
+                     lines=lines)
+
+
+def _sizes_cli(argv: Sequence[str]) -> int:
+    ap = argparse.ArgumentParser(prog="vd_align.py sizes",
+                                 description="Half-slot mode: sizes for the Fusion slots and bays (nothing is read "
+                                             "from job files)")
+    for name, hlp in (("ball", "probe ball diameter"), ("stem", "stylus stem diameter"),
+                      ("free", "ball centre to where the probe body gets wider"), ("body", "probe body diameter"),
+                      ("length", "ball centre to the bottom of the collet nut"), ("thick", "stock thickness"),
+                      ("slot-depth", "side-A slot depth from face A")):
+        ap.add_argument("--" + name, type=float, required=True, help=hlp)
+    ap.add_argument("--widths", required=True, help='slot widths, e.g. "0.625,0.75"')
+    ap.add_argument("--slot-length", type=float, help="edge to round-end centre (default 1.25 in)")
+    ap.add_argument("--edge-tol", type=float, help="real edge vs stock box at the slots (default 0.15 in)")
+    ap.add_argument("--overlap", type=float, help="how far the bay goes into the slot (default 0.15 in)")
+    ap.add_argument("--search", type=float, help="end-search length &vd_slen (default 2.5 in)")
+    ap.add_argument("--max-rot", type=float, default=5.0, help="board rotation, degrees (default 5)")
+    ap.add_argument("--bay-width", type=float, help="planned bay width (to check)")
+    ap.add_argument("--bay-reach", type=float, help="planned bay reach past the round-end centre (to check)")
+    ap.add_argument("--mm", action="store_true", help="all values in mm")
+    ap.add_argument("--nogui", action="store_true", help=argparse.SUPPRESS)
+    a = ap.parse_args(list(argv))
+    try:
+        widths = [float(w) for w in re.split(r"[,;\s]+", a.widths.strip()) if w]
+    except ValueError:
+        print("--widths: numbers separated by commas")
+        return 2
+    r = slot_bay_sizes(a.ball, a.stem, a.free, a.body, a.length, a.thick, a.slot_depth, widths,
+                       slot_length=a.slot_length, edge_tol=a.edge_tol, overlap=a.overlap, search=a.search,
+                       max_rot=a.max_rot,
+                       bay_width=a.bay_width, bay_reach=a.bay_reach, mm=a.mm)
+    print(r.text())
+    return 0 if r.ok else 1
+
+
+@dataclass
 class RoughData:
     """Slot openings the operator jogged to with the cutter (half-slot mode, side B, before the bay cut)."""
     units: int
@@ -2682,6 +2834,8 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     if argv and argv[0].lower() in ("prepare", "align", "calresult"):
         word = argv[0].lower()
         return _window(word, argv[1] if len(argv) > 1 else None)
+    if argv and argv[0].lower() == "sizes":
+        return _sizes_cli(argv[1:])
     if argv and argv[0].lower() == "shelltest":
         _log("shelltest: command line as received: " + _raw_command_line())
         _log("shelltest: arguments: " + repr(argv[1:]))

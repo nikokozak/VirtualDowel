@@ -28,13 +28,15 @@ python3 -m unittest discover -s tests
 python3 -m unittest tests.test_vd.TestFitMath.test_fit_recovers_rigid_transform
 # the window (writes generated files into the repo folder; they are in .gitignore)
 /usr/bin/python3 vd_align.py prepare
+# half-slot sizes for the Fusion slots and bays (nothing is read from job files)
+python3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75
 # command line alignment
 python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --holes "12,1,0.5;12,29,0.625" --nogui
 # zip for the shop PC (tracked files only, so no generated files)
 git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
 ```
 
-Expected test result: `OK` (139 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (145 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 

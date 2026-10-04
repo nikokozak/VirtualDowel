@@ -89,7 +89,7 @@ So the 0.3 in bay oversize needs the real edge within about 0.15 in of the box a
 - **Slot length:** the round end at least 0.75 in inside the real stock edge.
 - **Probing height:** the ball below the bay floor by at least its radius; the probe body bottom above the bay floor.
 
-For example, with a 1/8 in ball, a 0.8 in body below the stock top and slots of 0.625 and 0.75 in: bay about 2.3 in wide, reaching about 1.1 in past the round end.
+Built (`slot_bay_sizes`, CLI word `sizes`). The bay reach is measured from the round-end centre, the slot's reference point. Example: 1/8 in ball, 0.8 in body below the stock top, free stylus 1 in, 3 in stock, side-A slots 1.75 in deep, slots 0.625 and 0.75 in wide and 1.25 in long: bay at least 2.225 in wide, reaching 1.113 in past the round-end centre, 1.4 in deep; park the ball 0.65 to 1.49 in above the spoilboard. The simulator probes this minimum bay without a collision, with a 0.2 in rough-fit error and at both ends of the park band (a test).
 
 The bay must be open to the outside edge. A closed pocket, round or not, does not work, because the probe cannot come down into it from above. An open bay also lets every plunge happen in the air outside the stock.
 
