@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import math
 import os
+import sys
 import traceback
 import webbrowser
 from typing import Dict, List, Optional, Tuple
@@ -47,8 +48,55 @@ def _fmt(v: Optional[float]) -> str:
     return f"{v:.4f}".rstrip("0").rstrip(".") if v != int(v) else str(int(v))
 
 
+METHODS = {
+    "holes": ("Through holes", "Two holes of different sizes, cut through the board by side A on the flip axis. "
+              "The most accurate. Needs the Z travel to lift a cutter as long as the board is thick above the board."),
+    "slots": ("Half slots", "For thick boards: two slots in the board's edges, cut half depth by side A. On side B a "
+              "short bay cut opens them, then the probe comes in from the side. Sizes: click Slot and bay sizes."),
+    "through": ("Through slots", "Two slots in the board's edges, cut through from outside with a bit as long as the "
+                "board is thick. Use when that bit cannot be lifted above the board."),
+}
+STEPS = {"holes": ("Prepare", "Probe", "Align", "Cut side B"), "through": ("Prepare", "Probe", "Align", "Cut side B"),
+         "slots": ("Prepare", "Rough locate", "Cut bays", "Probe", "Align", "Cut side B")}
+
+NEXT = {
+    "holes": """Through holes - what to do now
+  Before this: side A has cut two holes of different sizes through the board, on the flip axis.
+  1. Add files: the side-B job files from Fusion or VCarve, one per tool.
+  2. Enter each hole: X and Y of its centre and its diameter, in side-B (Setup 2) coordinates.
+  3. Stock box: only if a file does not state its stock size (the note says).
+  4. Click Check and fix anything marked FAIL.
+  5. Fit the PROBE, plug in its cable, and click Start probing.
+     ShopBot asks you to jog the probe over each hole; then this window comes back with the results.""",
+    "slots": """Half slots - what to do now
+  Before this: side A has cut two half slots in the board's edges, on the flip axis, of different widths.
+  1. Add files: the side-B job files, and choose the bay cut file (made in Fusion).
+  2. Enter each slot: X and Y of its round-end centre and its width, in side-B coordinates.
+  3. Stock box: needed unless a file states its stock size (the note says).
+  4. Click Check and fix anything marked FAIL.
+  5. Fit the BAY CUTTER and click Start rough locate.
+     ShopBot asks you to jog the bit tip over each slot opening on the board's edge.
+  After that: cut the bays, fit the probe, type C80 again and click Start probing.""",
+    "slots2": """Half slots - the bay file is placed: {bay}
+  1. If not done yet: in ShopBot, FP that file. Look at it in Preview, zero Z with the bay cutter
+     (do NOT zero X or Y) and run it.
+  2. Vacuum the slots. Fit the PROBE and plug in its cable.
+  3. Click Start probing. At each slot, jog the probe ball about 0.3 in (8 mm) outside the opening,
+     in line with the slot, at the park height from Slot and bay sizes.
+  To place the bay file again instead, click Start rough locate.""",
+    "through": """Through slots - what to do now
+  Before this: side A has cut two slots through the board in its edges, on the flip axis, of different widths.
+  1. Add files: the side-B job files, one per tool.
+  2. Enter each slot: X and Y of its round-end centre and its width, in side-B coordinates.
+  3. Stock box: needed unless a file states its stock size (the note says).
+  4. Click Check and fix anything marked FAIL.
+  5. Fit the PROBE and click Start probing. At each slot, jog the probe ball about 0.3 in (8 mm)
+     outside the opening, in line with the slot.""",
+}
+
+
 class App:
-    """mode: 'prepare', 'align' or 'calresult'. result_code is what the process exits with
+    """mode: 'prepare', 'align', 'calresult' or 'rough'. result_code is what the process exits with
     (0 = done / started, 3 = closed without doing anything, 1 = error)."""
 
     def __init__(self, mode: str, data_path: Optional[str] = None, root: Optional[tk.Tk] = None,
@@ -62,7 +110,11 @@ class App:
         self.hole_rows: List[Tuple[tk.StringVar, tk.StringVar, tk.StringVar, ttk.Frame]] = []
         self.pd: Optional[va.ProbeData] = None
         self.cal: Optional[va.Calibration] = None
-        self.root.title("Virtual Dowel")
+        self.root.title({"prepare": "Virtual Dowel - prepare", "align": "Virtual Dowel - results",
+                         "calresult": "Virtual Dowel - probe calibration",
+                         "rough": "Virtual Dowel - rough locate"}.get(mode, "Virtual Dowel"))
+        self.method = "holes"            # how the board is located: holes / slots / through
+        self.stage2 = False              # half slots: the bay file is placed, probing comes next
         self.root.minsize(820, 560)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.report_callback_exception = self._on_error
@@ -133,30 +185,23 @@ class App:
         r = self.root
         outer = ttk.Frame(r, padding=10)
         outer.pack(fill="both", expand=True)
-        steps = ("1  Prepare", "2  Probe (ShopBot)", "3  Align")
-        bar = ttk.Frame(outer)
-        bar.pack(fill="x", pady=(0, 8))
-        cur = 0 if self.mode == "prepare" else 2
-        for i, txt in enumerate(steps):
-            tk.Label(bar, text=txt, padx=10, pady=3, font=("Segoe UI", 10, "bold" if i == cur else "normal"),
-                     fg="white" if i == cur else "#555", bg="#2f5d8a" if i == cur else "#e4e4e4").pack(
-                side="left", padx=(0, 4))
-        self.subtitle = ttk.Label(bar, text="")
-        self.subtitle.pack(side="right")
+        self.steps_bar = ttk.Frame(outer)
+        self.steps_bar.pack(fill="x", pady=(0, 8))
+        self.loc_var = tk.StringVar(value="holes")
         if self.mode == "prepare":
             lf = ttk.Frame(outer)
-            lf.pack(fill="x", pady=(0, 6))
-            ttk.Label(lf, text="Locate with").pack(side="left")
-            self.loc_var = tk.StringVar(value="holes")
-            for val, txt in (("holes", "Through holes"), ("slots", "Half slots - bay cut first"),
-                             ("through", "Through slots")):
-                ttk.Radiobutton(lf, text=txt, value=val, variable=self.loc_var,
+            lf.pack(fill="x", pady=(0, 2))
+            ttk.Label(lf, text="Locate side B with", font=("Segoe UI", 10, "bold")).pack(side="left")
+            for val in ("holes", "slots", "through"):
+                ttk.Radiobutton(lf, text=METHODS[val][0], value=val, variable=self.loc_var,
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
-            ttk.Button(lf, text="Guide", command=self.on_guide).pack(side="right")
-            ttk.Button(lf, text="Sizes...", command=self.on_sizes).pack(side="right", padx=(0, 6))
+            ttk.Button(lf, text="Thick-stock guide", command=self.on_guide).pack(side="right")
+            ttk.Button(lf, text="Slot and bay sizes...", command=self.on_sizes).pack(side="right", padx=(0, 6))
+            self.method_note = ttk.Label(outer, text="", wraplength=900, justify="left", foreground="#444")
+            self.method_note.pack(fill="x", pady=(0, 6))
 
         # side-B files
-        jf = ttk.LabelFrame(outer, text="Side-B job files - one per tool", padding=6)
+        jf = ttk.LabelFrame(outer, text="Side-B job files - the files for the flipped side, one per tool", padding=6)
         jf.pack(fill="both", expand=False)
         cols = ("file", "result", "rotation", "spacing", "output")
         self.tree = ttk.Treeview(jf, columns=cols, show="headings", height=5, selectmode="browse")
@@ -183,14 +228,16 @@ class App:
         hdr = ttk.Frame(hf)
         hdr.pack(fill="x")
         for t, w in (("#", 3), ("X", 11), ("Y", 11), ("Diameter", 11)):
-            ttk.Label(hdr, text=t, width=w).pack(side="left", padx=2)
+            lbl = ttk.Label(hdr, text=t, width=w)
+            lbl.pack(side="left", padx=2)
+        self.size_header = lbl
         self.holes_box = ttk.Frame(hf)
         self.holes_box.pack(fill="x")
         self.add_hole_btn = ttk.Button(hf, text="+ Add hole", command=lambda: self.add_hole_row())
         self.add_hole_btn.pack(anchor="w", pady=(4, 0))
 
         # stock box
-        sf = ttk.LabelFrame(mid, text="Stock box - only for files without a stock size (Fusion)", padding=6)
+        sf = ttk.LabelFrame(mid, text="Stock box - side-B coordinates", padding=6)
         sf.pack(side="left", fill="both", padx=(8, 0))
         self.stock_vars = [tk.StringVar() for _ in range(4)]
         g = ttk.Frame(sf)
@@ -226,7 +273,7 @@ class App:
             self.probe_info.pack(anchor="w")
 
         # messages / report
-        mf = ttk.LabelFrame(outer, text="Checks and report", padding=4)
+        mf = ttk.LabelFrame(outer, text="What to do - checks - reports", padding=4)
         mf.pack(fill="both", expand=True, pady=(8, 0))
         self.text = tk.Text(mf, height=10, wrap="word", font=MONO)
         sb = ttk.Scrollbar(mf, command=self.text.yview)
@@ -239,12 +286,14 @@ class App:
         bf.pack(fill="x", pady=(8, 0))
         self.status = tk.Label(bf, text="", anchor="w", font=("Segoe UI", 10, "bold"))
         self.status.pack(side="left", fill="x", expand=True)
-        ttk.Button(bf, text="Close", command=self.on_close).pack(side="right")
         if self.mode == "prepare":
-            ttk.Button(bf, text="Start probing", command=self.on_start).pack(side="right", padx=(0, 6))
-            self.rough_btn = ttk.Button(bf, text="Start rough locate", command=self.on_start_rough)
-            ttk.Button(bf, text="Check", command=self.on_check).pack(side="right", padx=(0, 6))
+            ttk.Button(bf, text="Close - run nothing", command=self.on_close).pack(side="right")
+            self.start_btn = ttk.Button(bf, text="Start probing (probe in)", command=self.on_start)
+            self.rough_btn = ttk.Button(bf, text="Start rough locate (bay cutter in)", command=self.on_start_rough)
+            self.check_btn = ttk.Button(bf, text="Check", command=self.on_check)
         else:
+            ttk.Button(bf, text="Close", command=self.on_close).pack(side="right")
+            ttk.Button(bf, text="Open the folder", command=self.on_open_folder).pack(side="right", padx=(0, 6))
             ttk.Button(bf, text="Align", command=self.on_align).pack(side="right", padx=(0, 6))
 
         self._load_initial()
@@ -260,7 +309,7 @@ class App:
             self.mvars[k] = tk.IntVar(value=int(v)) if kind == "bool" else tk.StringVar(value=_fmt(v))
         g = ttk.Frame(pf)
         g.pack(fill="x")
-        ttk.Label(g, text="Input").grid(row=0, column=0, sticky="w")
+        ttk.Label(g, text="Probe input").grid(row=0, column=0, sticky="w")
         ttk.Spinbox(g, from_=1, to=8, width=4, textvariable=self.mvars["pin"]).grid(row=0, column=1, padx=(2, 12))
         ttk.Label(g, text="Reads when deflected").grid(row=0, column=2, sticky="w")
         ttk.Combobox(g, values=("0", "1"), width=3, state="readonly",
@@ -273,16 +322,16 @@ class App:
         g2.pack(fill="x", pady=(4, 0))
         ttk.Checkbutton(g2, text="Turn the spindle 180° per hole (cancels a bent stylus)",
                         variable=self.mvars["spin180"]).pack(side="left")
-        ttk.Checkbutton(g2, text="Finger test first", variable=self.mvars["test"]).pack(side="left", padx=12)
+        ttk.Checkbutton(g2, text="Finger test before moving", variable=self.mvars["test"]).pack(side="left", padx=12)
         self.sim_var = tk.IntVar(value=0)
-        ttk.Checkbutton(g2, text="Dry run (no motion, in Preview)",
+        ttk.Checkbutton(g2, text="Dry run - no motion, you type the positions (rehearse in Preview)",
                         variable=self.sim_var).pack(side="left")
         g3 = ttk.Frame(pf)
         g3.pack(fill="x", pady=(4, 0))
         ttk.Button(g3, text="Advanced...", command=self.on_advanced).pack(side="left")
         ttk.Button(g3, text="Calibrate probe...", command=self.on_calibrate).pack(side="left", padx=6)
         cal = va.read_machine_file().get("calibration")
-        txt = "No probe calibration yet."
+        txt = "No probe calibration yet - Calibrate probe finds the input and measures the ball."
         if isinstance(cal, dict):
             ecc = cal.get("ecc")
             txt = (f"Last calibration {cal.get('date', '?')}: repeatability {cal.get('repeat', 0):.4f}, "
@@ -292,15 +341,69 @@ class App:
         self.cal_label.pack(side="left", padx=8)
 
     def _on_locate_mode(self) -> None:
-        mode = self.loc_var.get()
-        self.holes_frame.configure(text="Reference holes - side-B design coordinates" if mode == "holes" else
-                                   "Slots - X and Y of the round-end centre and the width - side-B coordinates")
-        if mode == "slots":
+        self._set_method(self.loc_var.get())
+        if self.mode != "prepare":
+            return
+        self.method_note.configure(text=METHODS[self.method][1])
+        for b in (self.start_btn, self.rough_btn, self.check_btn):
+            b.pack_forget()
+        # right to left: Start probing, then (half slots) the rough locate, then Check - so they read in work order
+        self.start_btn.pack(side="right", padx=(0, 6))
+        if self.method == "slots":
             self.bay_frame.pack(fill="x", pady=(8, 0), after=self.mid)
             self.rough_btn.pack(side="right", padx=(0, 6))
         else:
             self.bay_frame.pack_forget()
-            self.rough_btn.pack_forget()
+        self.check_btn.pack(side="right", padx=(0, 6))
+        self.show_next_steps()
+
+    def _set_method(self, method: str) -> None:
+        """Labels that depend on holes or slots, and the step bar."""
+        self.method = method if method in METHODS else "holes"
+        slots = self.method != "holes"
+        self.holes_frame.configure(text="Slots - X and Y of the round-end centre and the width - side-B coordinates"
+                                   if slots else "Reference holes - X and Y of the centre and the diameter - "
+                                                 "side-B coordinates")
+        self.size_header.configure(text="Width" if slots else "Diameter")
+        self.add_hole_btn.configure(text="+ Add slot" if slots else "+ Add hole")
+        self._refresh_stock_note()
+        self._draw_steps()
+
+    def _draw_steps(self) -> None:
+        for w in self.steps_bar.winfo_children():
+            w.destroy()
+        steps = STEPS[self.method]
+        if self.mode == "align":
+            cur = steps.index("Align")
+        elif self.method == "slots" and self.stage2:
+            cur = steps.index("Probe")
+        else:
+            cur = 0
+        for i, txt in enumerate(steps):
+            tk.Label(self.steps_bar, text=f"{i + 1}  {txt}", padx=8, pady=3,
+                     font=("Segoe UI", 10, "bold" if i == cur else "normal"), fg="white" if i == cur else "#555",
+                     bg="#2f5d8a" if i == cur else "#e4e4e4").pack(side="left", padx=(0, 4))
+
+    def show_next_steps(self) -> None:
+        """The report box shows what to do next until a check or a result replaces it."""
+        if self.method == "slots" and self.stage2:
+            bay = self.bay_var.get().strip()
+            out = va.default_rough_path(bay, bool(self.sim_var.get())) if bay else "(the bay file)_VDROUGH.sbp"
+            self._set_text(NEXT["slots2"].format(bay=out))
+        else:
+            self._set_text(NEXT[self.method])
+        self._set_status("", "black")
+
+    def on_open_folder(self) -> None:
+        folder = os.path.dirname(self.jobs[0]) if self.jobs else va.HERE
+        try:
+            if os.name == "nt":
+                os.startfile(folder)                         # noqa: S606 - Windows Explorer
+            else:
+                import subprocess
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", folder])
+        except OSError as e:
+            self.error("Virtual Dowel", f"Could not open {folder}: {e}")
 
     def on_pick_bay(self) -> None:
         got = filedialog.askopenfilename(parent=self.root, title="Bay cut file (.sbp) from Fusion",
@@ -621,27 +724,30 @@ class App:
         if stock:
             for v, s in zip(self.stock_vars, stock):
                 v.set(_fmt(s))
-        if self.mode == "prepare":
-            self.loc_var.set(sess.get("mode") or "holes")
-            self.bay_var.set(sess.get("bay") or "")
-            key = sess.get("key")
-            if key:
-                for v, k in zip(self.key_vars, key):
-                    v.set(_fmt(k))
-            self._on_locate_mode()
-        self._refresh_stock_note()
-        self.subtitle.configure(text="Choose the files and holes, then Start probing" if self.mode == "prepare"
-                                else "Results for the probing just done")
+        self.loc_var.set(sess.get("mode") or ("slots" if self.pd is not None and self.pd.open else "holes"))
+        self.bay_var.set(sess.get("bay") or "")
+        key = sess.get("key")
+        if key:
+            for v, k in zip(self.key_vars, key):
+                v.set(_fmt(k))
+        # half slots: after a rough locate, the next step is probing
+        self.stage2 = sess.get("kind") == "rough" and os.path.exists(va.ROUGH_DATA)
+        self._on_locate_mode()
 
     def _show_probe_info(self, sess: dict) -> None:
         pd = self.pd
         holes, _, _ = va.compute_holes(pd)
         when = datetime.datetime.fromtimestamp(os.path.getmtime(self.data_path)).strftime("%Y-%m-%d %H:%M")
-        lines = [f"Probed {when}   {pd.nholes} holes   {pd.passes} fine passes"
+        what = "slots" if pd.open else "holes"
+        lines = [f"Probed {when}   {pd.nholes} {what}   {pd.passes} fine passes"
                  + ("   spindle 0/180" if pd.spin180 else "") + ("   SIMULATED" if pd.sim else "")]
         for h in holes:
-            lines.append(f"  hole {h.index}: centre X {h.center[0]:.4f}  Y {h.center[1]:.4f}   "
-                         f"diameter {h.dia:.4f}   repeat {h.repeat:.4f}")
+            if h.open:
+                lines.append(f"  slot {h.index}: round-end centre X {h.center[0]:.4f}  Y {h.center[1]:.4f}   "
+                             f"width {h.dia:.4f}   repeat {h.repeat:.4f}")
+            else:
+                lines.append(f"  hole {h.index}: centre X {h.center[0]:.4f}  Y {h.center[1]:.4f}   "
+                             f"diameter {h.dia:.4f}   repeat {h.repeat:.4f}")
         prepared = sess.get("prepared")
         if prepared and os.path.getmtime(self.data_path) + 5 < prepared:
             self.stale = True
@@ -683,6 +789,8 @@ class App:
         need, ext = va.needs_stock(self.jobs)
         if not self.jobs:
             txt = "Add the side-B files first."
+        elif need and self.method != "holes":
+            txt = "Needed: the file has no stock size, and slots need the box to know which edge each opens to."
         elif need:
             txt = "Needed: at least one file has no stock size."
             if ext:
@@ -739,10 +847,11 @@ class App:
             if not (tx or ty or td):
                 continue
             x, y, d = _num(tx), _num(ty), _num(td)
+            what = "slot" if self.method != "holes" else "hole"
             if x is None or y is None:
-                errs.append(f"hole {i}: X and Y must be numbers")
+                errs.append(f"{what} {i}: X and Y must be numbers")
             elif d is None or d <= 0:
-                errs.append(f"hole {i}: enter its diameter")
+                errs.append(f"{what} {i}: enter its {'width' if what == 'slot' else 'diameter'}")
             else:
                 holes.append((x, y, d))
         return holes, errs
@@ -818,9 +927,11 @@ class App:
         checks = va.precheck_jobs(self.jobs, holes, stock, m["tip"])
         lines = self._show_checks(checks)
         ok = all(r.ok for _, r in checks)
-        self._set_text(("Everything checks out - ready to probe.\n\n" if ok else
+        nxt = ("Fit the bay cutter and click Start rough locate." if self.method == "slots" and not self.stage2
+               else "Fit the probe and click Start probing.")
+        self._set_text((f"Everything checks out. Next: {nxt}\n\n" if ok else
                         "Some files would FAIL even with perfect probing:\n\n") + "\n".join(lines))
-        self._set_status("Ready to probe" if ok else "Not ready", GREEN if ok else RED)
+        self._set_status(f"Ready - {nxt}" if ok else "Not ready", GREEN if ok else RED)
         return ok
 
     def on_start(self) -> None:
@@ -933,11 +1044,11 @@ class App:
         elif self.pd is not None and self.jobs and all(any(t) for t in self._hole_texts()):
             self.on_align()
         elif self.pd is not None:
-            self._set_text("Add the side-B files and check the hole values, then click Align.")
+            self._set_text("Add the side-B files and check the hole or slot values, then click Align.")
 
     def on_align(self) -> None:
         if self.pd is None or self.stale:
-            self.error("Virtual Dowel", "There is no usable probe data. Probe the holes first (type C80 in ShopBot).")
+            self.error("Virtual Dowel", "There is no usable probe data. Probe first (type C80 in ShopBot).")
             self._set_status("Not aligned - no usable probe data", RED)
             return
         holes, errs = self.read_holes()
@@ -946,7 +1057,7 @@ class App:
         if not self.jobs:
             errs.append("add the side-B job files")
         if len(holes) != self.pd.nholes:
-            errs.append(f"probing measured {self.pd.nholes} holes but the table has {len(holes)}")
+            errs.append(f"probing measured {self.pd.nholes} but the table has {len(holes)} - add or remove rows")
         if errs:
             self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
             self._set_status("Not aligned", RED)

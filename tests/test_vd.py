@@ -2408,6 +2408,11 @@ except Exception:                         # no tkinter or no display: window tes
     HAVE_TK = False
 
 
+def ttk_Button():
+    from tkinter import ttk
+    return ttk.Button
+
+
 def vd_app_red():
     import vd_app
     return vd_app.RED
@@ -2514,6 +2519,63 @@ class TestWindow(_Folder):
         vals = va._sbp_value_lines(self.run_file())
         self.assertEqual((vals["rough"], vals["open1"], vals["open2"]), ("0", "3", "4"))
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "bays_VDROUGH.sbp")))   # the new session removed it
+
+    def current_step(self, a):
+        return [w.cget("text") for w in a.steps_bar.winfo_children() if w.cget("bg") == "#2f5d8a"][0]
+
+    def test_the_window_says_what_to_do_for_each_method(self):
+        a = self.app("prepare")
+        report = lambda: a.text.get("1.0", "end")                               # noqa: E731
+        self.assertIn("Through holes - what to do now", report())
+        self.assertEqual(len(a.steps_bar.winfo_children()), 4)
+        self.assertEqual(self.current_step(a), "1  Prepare")
+        self.assertEqual(a.size_header.cget("text"), "Diameter")
+        self.assertIn("lift a cutter", a.method_note.cget("text"))
+        a.loc_var.set("slots")
+        a._on_locate_mode()
+        self.assertIn("Fit the BAY CUTTER and click Start rough locate", report())
+        self.assertEqual([w.cget("text") for w in a.steps_bar.winfo_children()],
+                         ["1  Prepare", "2  Rough locate", "3  Cut bays", "4  Probe", "5  Align", "6  Cut side B"])
+        self.assertEqual((a.size_header.cget("text"), a.add_hole_btn.cget("text")), ("Width", "+ Add slot"))
+        # buttons read in work order, left to right: Check, rough locate, probing, close
+        order = [w.cget("text") for w in reversed(a.check_btn.master.pack_slaves()) if isinstance(w, ttk_Button())]
+        self.assertEqual(order, ["Check", "Start rough locate (bay cutter in)", "Start probing (probe in)",
+                                 "Close - run nothing"])
+        a._set_holes([(1.5, 15.0, None), (22.5, 15.0, 0.75)])
+        self.assertIn("slot 1: enter its width", a.read_holes()[1])
+        a.loc_var.set("through")
+        a._on_locate_mode()
+        self.assertNotIn("Start rough locate (bay cutter in)",
+                         [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())])
+        self.assertIn("Through slots - what to do now", report())
+        a.root.destroy()
+
+    def test_after_a_rough_locate_the_next_step_is_probing(self):
+        va.save_session({"kind": "rough", "mode": "slots", "jobs": [self.job], "bay": os.path.join(self.tmp, "bays.sbp"),
+                         "holes": [list(d) for d in SLOTS], "stock": list(STOCK24), "key": None})
+        with open(va.ROUGH_DATA, "w") as fh:
+            fh.write(rough_text([(12.0, 0.0), (12.0, 30.0)]))
+        a = self.app("prepare")
+        self.assertEqual(a.loc_var.get(), "slots")
+        self.assertEqual(self.current_step(a), "4  Probe")
+        self.assertIn("bays_VDROUGH.sbp", a.text.get("1.0", "end"))
+        a.root.destroy()
+
+    def test_results_screen_names_slots(self):
+        design = [sv[:3] for sv in SLOTS_B]
+        va.save_session({"kind": "probe", "mode": "slots", "jobs": [self.job], "holes": [list(d) for d in design],
+                         "stock": None, "prepared": time.time() - 60})
+        vm, _, _, _ = slot_run(0.5, (1.0, 1.0))
+        with open(va.DEFAULT_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        b = self.app("align")
+        self.assertIn("2 slots", b.probe_info.cget("text"))
+        self.assertIn("round-end centre", b.probe_info.cget("text"))
+        self.assertTrue(b.holes_frame.cget("text").startswith("Slots"))
+        self.assertEqual(self.current_step(b), "5  Align")
+        b.on_align()
+        self.assertEqual(b.tree.item(self.job)["values"][1], "PASS")
+        b.root.destroy()
 
     def test_size_calculator_window(self):
         a = self.app("prepare")

@@ -148,11 +148,11 @@ Calibration writes its own data file (`vd_cal_data.csv`). It never touches the j
 
 ## 3b. Thick stock: half slots
 
-Use this when the board is too thick to drill the reference holes through: the machine cannot lift a cutter as long as the board is thick above the board. The full guide, with drawings, is `docs\guide.html` (the **Guide** button in the window opens it).
+Use this when the board is too thick to drill the reference holes through: the machine cannot lift a cutter as long as the board is thick above the board. The full guide, with drawings, is `docs\guide.html` (the **Thick-stock guide** button in the window opens it).
 
 **The idea.** The two reference holes move out to the edges of the board and become U-shaped slots that open to the outside: half slots. Side A cuts them from face A to a little past mid-thickness, from outside the board. On side B, a short bay cut from face B opens a path down to each slot. Then the probe comes in from the side and probes each slot like a hole. Virtual Dowel never makes toolpaths: you make the slots, the bays and the side-B job in Fusion.
 
-**Sizes.** Get the minimum slot and bay sizes for your probe and stock first: click **Sizes...** in the window (a live drawing of side B and of one slot and bay; anything too small turns red), or in a command window in the VirtualDowel folder (all values in inches; add `--mm` for millimetres):
+**Sizes.** Get the minimum slot and bay sizes for your probe and stock first: click **Slot and bay sizes...** in the window (a live drawing of side B and of one slot and bay; anything too small turns red), or in a command window in the VirtualDowel folder (all values in inches; add `--mm` for millimetres):
 
 ```
 py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75 --slot-length 1.25 --bay-width 2.3 --bay-reach 1.2
@@ -164,9 +164,9 @@ py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 
 
 1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. Enter the X and Y of each round-end centre in side-B coordinates. Zero X/Y at the Setup 1 WCS corner and run side A.
 2. Flip and clamp. Keep the slot openings free.
-3. Fit the bay cutter. Type `C80`, choose **Half slots - bay cut first**, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate**. Jog the bit tip over each slot opening (slot 1, then slot 2; the key notch last, if you cut one).
+3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate side B with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter in)**. Jog the bit tip over each slot opening (slot 1, then slot 2; the key notch last, if you cut one).
 4. The window says which file to run: `<bay file>_VDROUGH.sbp`. Look at it in Preview, zero Z with the bay cutter, and run it. Do not zero X or Y.
-5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing**. At each slot, jog the probe ball about 0.3 in outside the opening, in line with the slot, at the park height from the size calculator.
+5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe in)**. At each slot, jog the probe ball about 0.3 in outside the opening, in line with the slot, at the park height from the size calculator.
 6. The window aligns the side-B files as usual. Fit each cutter, zero Z only, and run each `_VD.sbp`.
 
 **Through slots** (a bit as long as the board is thick, but not the Z travel to lift it over the board): cut the slots through from outside on side A, choose **Through slots**, and go straight to step 5.
@@ -178,7 +178,7 @@ Nothing of the half-slot mode has run on the machine yet. Please do these in ord
 **H0. Install (2 min).** Copy the new VirtualDowel folder to the shop PC and double-click `vd_install.bat`. It writes the new custom cut.
 
 **H1. Dry run in Preview (10 min, no motion).**
-1. In Preview, type `C80`. Choose **Half slots**. Add `docs\example\sideB_example.sbp` as the side-B file (it states its 24 x 30 in stock size). Enter slot 1 as X 1.5, Y 15, width 0.625 and slot 2 as X 22.5, Y 15, width 0.75. Choose `docs\example\bays_example.sbp` as the bay file. Tick **Dry run** and click **Start rough locate**.
+1. In Preview, type `C80`. Under *Locate side B with*, choose **Half slots**. Add `docs\example\sideB_example.sbp` as the side-B file (it states its 24 x 30 in stock size). Enter slot 1 as X 1.5, Y 15, width 0.625 and slot 2 as X 22.5, Y 15, width 0.75. Choose `docs\example\bays_example.sbp` as the bay file. Tick **Dry run** and click **Start rough locate**.
 2. When asked, type the X and Y of each slot opening and `0`: `0.05, 15.1, 0` for slot 1 and `24.03, 15.2, 0` for slot 2.
 3. A window should say "Bay file placed" and name a `_VDROUGHSIM.sbp` file (Preview only).
 4. Type `C80` again, keep Dry run, click **Start probing**, and type each slot's round-end centre and width when asked: `1.5, 15, 0.625` and `22.5, 15, 0.75`. The window should align with PASS and write `sideB_example_VDSIM.sbp`.

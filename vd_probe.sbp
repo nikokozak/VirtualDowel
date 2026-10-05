@@ -141,7 +141,7 @@ IF &vd_cal = 0 THEN GOTO vd_cal_hdr_done
 WRITE #1; "CAL,"; &vd_calref
 vd_cal_hdr_done:
 '
-MSGBOX(VIRTUAL DOWEL probing. The spindle must be OFF with the digitizing probe in the collet and its cable plugged in. You will jog the probe over each reference hole in turn. Continue?,OKCancel,Virtual Dowel)
+MSGBOX(VIRTUAL DOWEL probing. The spindle must be OFF with the digitizing probe in the collet and its cable plugged in. You will jog the probe to each reference hole or slot in turn. Continue?,OKCancel,Virtual Dowel)
 IF &msganswer = "Cancel" THEN GOTO vd_quit
 IF &vd_sim = 1 THEN GOTO vd_hw_done
 'new session: the script deletes aligned files from earlier runs - they belong to an old board position.
