@@ -197,7 +197,7 @@ class App:
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
             ttk.Button(lf, text="Thick-stock guide", command=self.on_guide).pack(side="right")
             ttk.Button(lf, text="Slot and bay sizes...", command=self.on_sizes).pack(side="right", padx=(0, 6))
-            self.method_note = ttk.Label(outer, text="", wraplength=900, justify="left", foreground="#444")
+            self.method_note = ttk.Label(outer, text="", wraplength=900, justify="left")
             self.method_note.pack(fill="x", pady=(0, 6))
 
         # side-B files
