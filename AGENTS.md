@@ -20,14 +20,14 @@ The software is proprietary. The repository is private. Every source file has a 
 ## 2. Commands
 
 ```bash
-# all tests (window tests need tkinter; /usr/bin/python3 on this Mac has Tk 8.5)
-/usr/bin/python3 -m unittest discover -s tests
-# Homebrew python3 has no tkinter: 4 window tests skip. Fix: brew install python-tk@3.14
-python3 -m unittest discover -s tests
+# all tests. Window tests need tkinter with Tk 8.6: use the pyenv Python (3.12.2, Tk 8.6.17).
+# Do not use /usr/bin/python3 for the window: its Tk 8.5.9 shows an empty window on macOS 26.
+# Homebrew python3 has no tkinter: the window tests skip there.
+~/.pyenv/versions/3.12.2/bin/python3 -m unittest discover -s tests
 # one test
 python3 -m unittest tests.test_vd.TestFitMath.test_fit_recovers_rigid_transform
 # the window (writes generated files into the repo folder; they are in .gitignore)
-/usr/bin/python3 vd_align.py prepare
+~/.pyenv/versions/3.12.2/bin/python3 vd_align.py prepare
 # half-slot sizes for the Fusion slots and bays (nothing is read from job files)
 python3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75
 # command line alignment
