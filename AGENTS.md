@@ -32,8 +32,10 @@ python3 -m unittest tests.test_vd.TestFitMath.test_fit_recovers_rigid_transform
 python3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75
 # command line alignment
 python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --holes "12,1,0.5;12,29,0.625" --nogui
-# zip for the shop PC (tracked files only, so no generated files)
-git archive --format=zip --prefix=VirtualDowel/ -o ../VirtualDowel.zip HEAD
+# zip for the shop PC: only the files the shop needs (no tests, plans or agent files)
+git archive --format=zip --prefix=VirtualDowel/ -o VirtualDowel-2.1.zip HEAD vd_align.py vd_app.py vd_probe.sbp vd_selftest.sbp vd_align.bat vd_install.bat README.md LICENSE.txt docs/guide.html docs/example
+# release: tag, then attach the zip (the repo is private; the release is too)
+git tag -a v2.1 -m "Virtual Dowel 2.1" && git push origin v2.1 && gh release create v2.1 VirtualDowel-2.1.zip --title "Virtual Dowel 2.1" --notes-file notes.md
 ```
 
 Expected test result: `OK` (161 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
