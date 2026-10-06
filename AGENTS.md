@@ -33,12 +33,12 @@ python3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 
 # command line alignment
 python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --holes "12,1,0.5;12,29,0.625" --nogui
 # zip for the shop PC: only the files the shop needs (no tests, plans or agent files)
-git archive --format=zip --prefix=VirtualDowel/ -o VirtualDowel-2.1.zip HEAD vd_align.py vd_app.py vd_probe.sbp vd_selftest.sbp vd_align.bat vd_install.bat README.md LICENSE.txt docs/guide.html docs/example
+git archive --format=zip --prefix=VirtualDowel/ -o VirtualDowel-2.2.zip HEAD vd_align.py vd_app.py vd_probe.sbp vd_selftest.sbp vd_align.bat vd_install.bat README.md LICENSE.txt docs/guide.html docs/example
 # release: tag, then attach the zip (the repo is private; the release is too)
-git tag -a v2.1 -m "Virtual Dowel 2.1" && git push origin v2.1 && gh release create v2.1 VirtualDowel-2.1.zip --title "Virtual Dowel 2.1" --notes-file notes.md
+git tag -a v2.2 -m "Virtual Dowel 2.2" && git push origin v2.2 && gh release create v2.2 VirtualDowel-2.2.zip --title "Virtual Dowel 2.2" --notes-file notes.md
 ```
 
-Expected test result: `OK` (161 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (166 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -80,6 +80,8 @@ Data flow:
 6. **Calibrate** (optional, `prepare_calibration` / `analyze_calibration`). Finds the probe input, probes one known hole 10 times at 0 and 180 degrees, reports repeatability, effective ball and stylus offset. *Save* writes `vd_machine.json` and syncs the template. It writes `vd_cal_data.csv` and never touches job data or outputs.
 
 Key functions in `vd_align.py`: `parse_probe_data`, `compute_holes`, `fit_rigid`, `align`, `hole_checks`, `mirror_alternatives`, `SbpTransformer`, `build_output`, `run_alignment`, `render_run`, `prepare_probing`, `install_paths`.
+
+3D-print mode (`centre=True` in `align`, `run_alignment`, `precheck_jobs`, `prepare_probing`, `align_batch`; session `fit: centre`; window method "3D print" with bores or notches): no flip, exactly two references. The rigid fit of two points already puts the design midpoint on the measured midpoint and the design line on the measured line, so the mode only stops checking the spacing (prints shrink; the report gives the percentage) and skips the flip and mirror checks. Equal-size references cannot detect a print placed half a turn round (warned). Not run on the machine.
 
 Half-slot mode (thick stock; see `docs/thick-stock-plan.md`): a half slot is a hole with one open side at the stock edge. `compute_holes(pd, theta)` gives its round-end centre (`_slot_pass`); `open_side` / `slot_opening` come from the stock box; `run_rough` places the Fusion bay cut file from the jogged slot openings and writes `_VDROUGH.sbp` (never for part files: `bay_reach` check). Status: Python (phase 1), the routine in `vd_probe.sbp` (phase 2: `vd_probe_slot`, `&vd_open1..6`), the size calculator (`slot_bay_sizes`, CLI word `sizes`) and the rough locate (phase 3: `&vd_rough`, `prepare_rough`, word `rough`, key notch via `fit_lines`) are done and tested in the simulator (`SlotStock` in `tests/sbp_vm.py`, which also checks stylus and body collisions); the window has the minimum for a machine test (Locate with, bay file, Start rough locate, rough-result window, Guide) and a visual size calculator (*Sizes...*: live section and top-view drawings; inputs remembered in `vd_machine.json` under `sizes`); README section 3b has the machine tests H0-H3 and `docs/example` the dry-run kit. Not run on the machine.
 
@@ -166,7 +168,7 @@ New in v2.0, not yet run on the machine: the C80 custom cut and `C:\SbParts\Cust
 
 Known mechanical limit: the old ShopBot MAX lost X/Y steps once on a fast finishing pass. No software check finds a slip during a cut.
 
-In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`.
+In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`. v2.2 (2026-10-06) adds the 3D-print mode (two references, centre and line); also not yet run on the machine.
 
 ## 11. Working with Nikolai
 

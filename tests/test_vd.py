@@ -682,6 +682,44 @@ class TestFitMath(unittest.TestCase):
         al = va.align(DESIGN, self._holes(meas, [0.5, 0.625]), va.DEFAULTS, 1.0, 0.625)
         self.assertTrue(any("spacing" in f for f in al.failures))
 
+    def test_centre_fit_places_the_midpoint_and_reports_the_shrink(self):
+        # 3D print: two equal bores 4 in apart, printed 1 percent small, turned 1.5 deg, moved by (5, 7)
+        design = [(-2.0, 0.0, 0.5), (2.0, 0.0, 0.5)]
+        meas = [T(1.5, 5.0, 7.0, (-1.98, 0.0)), T(1.5, 5.0, 7.0, (1.98, 0.0))]
+        holes = self._holes(meas, [0.49, 0.49])
+        al = va.align(design, holes, va.DEFAULTS, 1.0, 0.5, centre=True)
+        self.assertEqual(al.failures, [])
+        self.assertAlmostEqual(math.degrees(al.fit.theta), 1.5, places=6)
+        self.assertAlmostEqual(al.fit.tx, 5.0, places=6)      # the design midpoint (0, 0) lands on the measured one
+        self.assertAlmostEqual(al.fit.ty, 7.0, places=6)
+        self.assertTrue(any("1.00 percent" in w and "closer" in w for w in al.warnings), al.warnings)
+        self.assertTrue(any("same size" in w for w in al.warnings))
+        # the same data FAILS the flip-milling fit: the spacing is 0.04 off
+        rigid = va.align(design, holes, dict(va.DEFAULTS, allow_symmetric_layout=1), 1.0, 0.5)
+        self.assertTrue(any("spacing" in f for f in rigid.failures))
+
+    def test_centre_fit_tells_equal_references_apart_by_position(self):
+        design = [(-2.0, 0.0, 0.5), (2.0, 0.0, 0.5)]
+        meas = [T(1.0, 5.0, 7.0, (1.98, 0.0)), T(1.0, 5.0, 7.0, (-1.98, 0.0))]       # jogged to 2 first
+        al = va.align(design, self._holes(meas, [0.5, 0.5]), va.DEFAULTS, 1.0, 0.5, centre=True)
+        self.assertEqual(al.failures, [])
+        self.assertEqual(al.perm, (1, 0))
+        self.assertAlmostEqual(math.degrees(al.fit.theta), 1.0, places=6)
+        self.assertTrue(any("half a turn" in w for w in al.warnings), al.warnings)
+        # the blind spot: a print placed half a turn round looks the same - the warning says so
+        meas = [T(179.0, 5.0, 7.0, (-1.98, 0.0)), T(179.0, 5.0, 7.0, (1.98, 0.0))]
+        al = va.align(design, self._holes(meas, [0.5, 0.5]), va.DEFAULTS, 1.0, 0.5, centre=True)
+        self.assertEqual((al.failures, al.perm), ([], (1, 0)))
+        # two different sizes catch it
+        al = va.align([(-2.0, 0.0, 0.5), (2.0, 0.0, 0.625)], self._holes(meas, [0.5, 0.625]), va.DEFAULTS, 1.0,
+                      0.625, centre=True)
+        self.assertTrue(any("rotation" in f for f in al.failures), al.failures)
+
+    def test_centre_fit_needs_exactly_two_references(self):
+        with self.assertRaises(va.VDError):
+            va.align([(0, 0, 0.5), (4, 0, 0.5), (2, 3, 0.5)], self._holes([(0, 0), (4, 0), (2, 3)]), va.DEFAULTS,
+                     1.0, 0.5, centre=True)
+
     def test_rotation_limit(self):
         meas = [T(7.0, 3.0, 2.0, d[:2]) for d in DESIGN]
         al = va.align(DESIGN, self._holes(meas, [0.5, 0.625]), va.DEFAULTS, 1.0, 0.625)
@@ -2042,10 +2080,39 @@ class _Folder(unittest.TestCase):
 class TestPrepare(_Folder):
     """Step 1: everything checked before probing, then vd_run.sbp written with the settings."""
 
-    def prep(self, jobs=None, design=DESIGN, stock=None, sim=False, mode="holes", **m):
+    def prep(self, jobs=None, design=DESIGN, stock=None, sim=False, mode="holes", centre=False, **m):
         mm = dict(self.machine, **m)
-        return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim, mode=mode,
+        return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim, mode=mode, centre=centre,
                                   template=os.path.join(ROOT, "vd_probe.sbp"))
+
+    def test_3d_print_two_equal_bores_end_to_end(self):
+        # a Fusion job (no material size) for a print 1 percent small, turned 1.2 deg, lying at (5, 7)
+        job = os.path.join(self.tmp, "print.sbp")
+        shutil.copy(FUSION, job)
+        design = [(-2.0, 0.0, 0.5), (2.0, 0.0, 0.5)]
+        self.assertIn("exactly two references", " ".join(self.prep([job], design + [(0.0, 2.0, 0.5)], centre=True).errors))
+        p = self.prep([job], design, pin=2, trig=1, centre=True)
+        self.assertTrue(p.ok, p.errors)
+        self.assertEqual(va.load_session()["fit"], "centre")
+        truth = [T(1.2, 5.0, 7.0, (-1.98, 0.0)) + (0.5,), T(1.2, 5.0, 7.0, (1.98, 0.0)) + (0.5,)]
+        mach = Machine(holes=truth, probe_pin=2, idle=0)
+        vm = VM(self.run_file(), mach, UI(parks=[(x + 0.03, y - 0.04, 0.1) for x, y, _ in truth]), numfmt=vb_single).run()
+        self.assertEqual(vm.ended, "END")
+        with open(va.DEFAULT_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        r = va.align_batch(va.DEFAULT_DATA, [job], design, centre=True)[0][1]
+        self.assertTrue(r.ok, r.report)
+        self.assertAlmostEqual(r.rotation_deg, 1.2, delta=0.02)
+        self.assertAlmostEqual(r.shift[0], 5.0, delta=0.01)
+        self.assertAlmostEqual(r.shift[1], 7.0, delta=0.01)
+        self.assertGreater(r.spacing_err, va.DEFAULTS["spacing_fail"])
+        self.assertTrue(any("percent" in w for w in r.warns), r.warns)
+        self.assertIn("Centre fit (3D print)", r.report)
+        self.assertTrue(os.path.exists(va.default_out_path(job, False)))
+        # the flip-milling fit refuses the same print
+        r2 = va.align_batch(va.DEFAULT_DATA, [job], design)[0][1]
+        self.assertFalse(r2.ok)
+        self.assertTrue(any("spacing" in f for f in r2.fails), r2.fails)
 
     def test_run_file_carries_the_settings_and_probes_end_to_end(self):
         p = self.prep(passes=3, tip=0.118, pin=2, trig=1)
@@ -2548,6 +2615,32 @@ class TestWindow(_Folder):
         self.assertNotIn("Start rough locate (bay cutter in)",
                          [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())])
         self.assertIn("Through slots - what to do now", report())
+        a.root.destroy()
+
+    def test_3d_print_method_in_the_window(self):
+        a = self.app("prepare")
+        a.loc_var.set("print")
+        a._on_locate_mode()
+        self.assertIn("3D print - what to do now", a.text.get("1.0", "end"))
+        self.assertEqual([w.cget("text") for w in a.steps_bar.winfo_children()],
+                         ["1  Prepare", "2  Probe", "3  Align", "4  Cut"])
+        self.assertTrue(a.ref_frame.winfo_manager())                      # bores / notches choice is shown
+        self.assertEqual((a.probe_mode(), a.size_header.cget("text")), ("holes", "Diameter"))
+        a.ref_var.set("through")
+        a._on_locate_mode()
+        self.assertEqual((a.probe_mode(), a.size_header.cget("text")), ("through", "Width"))
+        self.assertTrue(a.holes_frame.cget("text").startswith("References"))
+        buttons = [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())]
+        self.assertNotIn("Start rough locate (bay cutter in)", buttons)
+        a.loc_var.set("holes")
+        a._on_locate_mode()
+        self.assertFalse(a.ref_frame.winfo_manager())
+        a.root.destroy()
+        # the results screen remembers the method from the session
+        va.save_session({"kind": "probe", "mode": "through", "fit": "centre", "jobs": [self.job],
+                         "holes": [[-2.0, 0.0, 0.5], [2.0, 0.0, 0.5]], "stock": None, "sim": False, "prepared": 0})
+        a = self.app("align")
+        self.assertEqual((a.method, a.probe_mode()), ("print", "through"))
         a.root.destroy()
 
     def test_after_a_rough_locate_the_next_step_is_probing(self):

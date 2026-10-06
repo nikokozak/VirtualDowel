@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.1  (2026-10-04)
+Virtual Dowel - vd_align.py  v2.2  (2026-10-06)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.1"
+VERSION = "2.2"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -518,8 +518,14 @@ def _size_match(design: Sequence[DesignHole], holes: Sequence[HoleResult], perm,
 
 
 def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[str, float],
-          scale: float, nominal: float) -> Alignment:
+          scale: float, nominal: float, centre: bool = False) -> Alignment:
+    """centre = the 3D-print fit: exactly two references. The rigid fit of two points puts the design
+    midpoint on the measured midpoint and the design line through the references on the measured line,
+    whatever their spacing. So the spacing is only reported, not checked (prints shrink), and the flip
+    checks do not apply (the part is not flipped)."""
     n = len(design)
+    if centre and n != 2:
+        raise VDError("the centre fit (3D print) uses exactly two references")
     if n != len(holes):
         raise VDError(f"{len(holes)} holes were probed but {n} design positions were given")
     if n > 6:
@@ -538,7 +544,11 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
         msg = ("this hole layout looks the same after a half turn, so a board flipped the WRONG WAY "
                "(end over end instead of side over side) would pass unnoticed. Make the holes different "
                "sizes at least 0.1 in apart (e.g. 0.500 and 0.625 in) or add a hole off-centre")
-        if th.get("allow_symmetric_layout", 0):
+        if centre:
+            warnings.append("both references have about the same size, so a print placed half a turn round "
+                            "passes unnoticed and the job is cut turned. Place the print the right way round "
+                            "(within the rotation limit), or print two different sizes")
+        elif th.get("allow_symmetric_layout", 0):
             warnings.append(msg)
         else:
             failures.append(msg + "; or set allow_symmetric_layout to 1 in vd_settings.json")
@@ -572,7 +582,7 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
 
     def valid(c):
         f, _, _, worst, _ = c
-        return (abs(f.theta) <= max_rot and worst <= tol["spacing_fail"]
+        return (abs(f.theta) <= max_rot and (centre or worst <= tol["spacing_fail"])
                 and (n < 3 or f.max_resid <= tol["residual_fail"]))
 
     ok = sorted([c for c in cands if valid(c)], key=lambda c: c[0].rms)
@@ -582,7 +592,7 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
             failures.append(f"rotation {math.degrees(f.theta):+.3f} deg exceeds the "
                             f"{th['max_rotation_deg']:.1f} deg limit - board flipped the wrong way, wrong "
                             "hole coordinates, or wrong side")
-        if worst > tol["spacing_fail"]:
+        if worst > tol["spacing_fail"] and not centre:
             failures.append(f"hole spacing differs from the design by {worst:.4f} "
                             f"(limit {tol['spacing_fail']:.4f}) - wrong hole coordinates or a bad touch")
         if n >= 3 and f.max_resid > tol["residual_fail"]:
@@ -594,7 +604,15 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
     if perm != tuple(range(n)):
         warnings.append("holes were probed in a different order than listed; matched by size and "
                         f"position (listed hole i = probed hole {[p + 1 for p in perm]})")
-    if worst > tol["spacing_warn"]:
+    if centre:
+        _, _, dd, err = sp[0]
+        if abs(err) > tol["spacing_warn"] and dd > 0:
+            pct = 100 * abs(err) / dd
+            warnings.append(f"the references are {abs(err):.4f} ({pct:.2f} percent) "
+                            f"{'farther apart' if err > 0 else 'closer together'} than in the design - normal for a "
+                            "print. Only the midpoint and the line through the references are placed; another "
+                            "feature is off by about that percentage of its distance from the midpoint")
+    elif worst > tol["spacing_warn"]:
         warnings.append(f"hole spacing differs from design by up to {worst:.4f} "
                         "(material movement, machine scale, or imprecise design coordinates)")
     if n >= 3 and f.max_resid > tol["residual_warn"]:
@@ -1473,8 +1491,10 @@ class Result:
 
 def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
                   out_path: Optional[str] = None, th: Optional[Dict[str, float]] = None,
-                  allow_old_data: bool = False, stock: Optional[Box] = None, dry: bool = False) -> Result:
-    """dry = check only (before probing, with made-up probe data): nothing is written or deleted."""
+                  allow_old_data: bool = False, stock: Optional[Box] = None, dry: bool = False,
+                  centre: bool = False) -> Result:
+    """dry = check only (before probing, with made-up probe data): nothing is written or deleted.
+    centre = the 3D-print fit (see align)."""
     th = th or load_settings()
     with open(data_path, "r", encoding="latin-1", newline="") as fh:
         pd = parse_probe_data(fh.read(), data_path)
@@ -1508,13 +1528,13 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
     holes, offset, spread = compute_holes(pd)
     if pd.open:
         # half-slot touches run along the machine axes: a turned slot needs the board angle from a first fit
-        first = align(design, holes, th, pd.scale, pd.nominal)
+        first = align(design, holes, th, pd.scale, pd.nominal, centre)
         if abs(first.fit.theta) <= math.radians(th["max_rotation_deg"]):
             holes = compute_holes(pd, first.fit.theta)[0]
     f1, w1 = hole_checks(pd, holes, spread, th)
     fails += f1
     warns += w1
-    al = align(design, holes, th, pd.scale, pd.nominal)
+    al = align(design, holes, th, pd.scale, pd.nominal, centre)
     fails += al.failures
     warns += al.warnings
     if pd.sim:
@@ -1524,6 +1544,14 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
 
     lines, nl = read_text(job_path)
     notes: List[str] = []
+    if centre:
+        notes.append("Centre fit (3D print): the design midpoint between the two references is put on the "
+                     "measured midpoint and the design line through them on the measured line. The spacing "
+                     "is reported, not checked.")
+        mx, my = (design[0][0] + design[1][0]) / 2, (design[0][1] + design[1][1]) / 2
+        if math.hypot(mx, my) > 0.01 * pd.scale:
+            warns.append(f"the design midpoint between the references is X {mx:g} Y {my:g}, not X0 Y0 - the "
+                         "job is placed by that midpoint, not by its origin. Fine if that is what you meant")
     if retired:
         notes.append("Removed aligned files made from an earlier probing run (old board position): "
                      + "; ".join(os.path.basename(p) for p in retired))
@@ -1557,7 +1585,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
         if outside:
             fails.append(f"hole(s) {outside} lie outside the material in the job file "
                          f"(X {x0:g}..{x1:g}, Y {y0:g}..{y1:g}) - wrong coordinates")
-        if not al.failures:
+        if not al.failures and not centre:
             for name, alt in mirror_alternatives(design, holes, th, pd.scale, pd.nominal, box):
                 shift = math.hypot(alt.tx - al.fit.tx, alt.ty - al.fit.ty)
                 msg = (f"these holes have different side-A and side-B coordinates ({name} flip), and the "
@@ -1570,7 +1598,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
                     warns.append(msg + " (allowed by settings - double-check the coordinates)")
                 else:
                     fails.append(msg + "; or set allow_offaxis_ambiguity to 1 in vd_settings.json")
-    elif box_src != "bad" and has_mirror_symmetry(design, th["symmetry_tol"] * pd.scale,
+    elif box_src != "bad" and not centre and has_mirror_symmetry(design, th["symmetry_tol"] * pd.scale,
                                                   4 * th["diameter_rel_tol"] * pd.scale):
         msg = ("the job header has no material size (Fusion's ShopBot post does not write it), so the "
                "script cannot tell whether side-A hole coordinates were typed instead of side-B ones - and "
@@ -2143,7 +2171,7 @@ def synthetic_probe_text(design: Sequence[DesignHole], tip: float, units: int = 
 
 
 def precheck_jobs(jobs: Sequence[str], design: List[DesignHole], stock: Optional[Box], tip: float,
-                  th: Optional[Dict[str, float]] = None) -> List[Tuple[str, Result]]:
+                  th: Optional[Dict[str, float]] = None, centre: bool = False) -> List[Tuple[str, Result]]:
     """Every check that does not need the probe: run each job through the alignment with made-up
     probe data that matches the design exactly. Catches a wrong hole layout, a stock box that does
     not fit, side-A/side-B ambiguity and job files the script cannot rewrite - before probing."""
@@ -2159,7 +2187,7 @@ def precheck_jobs(jobs: Sequence[str], design: List[DesignHole], stock: Optional
                 fh.write(synthetic_probe_text(design, tip * (25.4 if u else 1.0), u))
             try:
                 res = run_alignment(data, job, design, out_path=os.path.join(tmpdir, "out.sbp"), th=th,
-                                    stock=stock, dry=True)
+                                    stock=stock, dry=True, centre=centre)
                 res.warns = [w for w in res.warns if not w.startswith("SIMULATED")]
             except (OSError, VDError) as e:
                 res = Result(ok=False, report=str(e), out_path=None, fails=[str(e)])
@@ -2206,13 +2234,16 @@ def slot_box(jobs: Sequence[str], stock: Optional[Box]) -> Optional[Box]:
 
 def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Optional[Box],
                     machine: Dict[str, float], sim: bool = False, template: str = None,
-                    run_path: str = None, mode: str = "holes") -> Prepared:
+                    run_path: str = None, mode: str = "holes", centre: bool = False) -> Prepared:
     """Step 1 of a job: check everything that can be checked without the probe, then write
     vd_run.sbp (the probing routine with these settings) for ShopBot to run next.
     mode: 'holes', 'slots' (half slots, after the bay cut) or 'through' (through slots): for slots
-    each one opens toward its nearest stock-box edge, which the routine needs to know."""
+    each one opens toward its nearest stock-box edge, which the routine needs to know.
+    centre: the 3D-print fit - two references, midpoint and line (see align)."""
     errs = machine_errors(machine)
-    if not 2 <= len(design) <= 6:
+    if centre and len(design) != 2:
+        errs.append("the 3D print fit uses exactly two references")
+    elif not 2 <= len(design) <= 6:
         errs.append("enter 2 to 6 reference holes")
     if any(d[2] is None for d in design):
         errs.append("every hole needs a diameter (the probing distance and the hole check use it)")
@@ -2237,7 +2268,7 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     errs = hole_errors(design, machine["tip"] / to_in, scale=1 / to_in)
     if errs:
         return Prepared(False, errs, [])
-    checks = precheck_jobs(jobs, design, stock, machine["tip"])
+    checks = precheck_jobs(jobs, design, stock, machine["tip"], centre=centre)
     if not all(r.ok for _, r in checks):
         return Prepared(False, ["fix the problems listed for the files marked FAIL, or remove those files"], checks)
     with open(template or TEMPLATE_FILE, "r", encoding="latin-1", newline="") as fh:
@@ -2264,7 +2295,8 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     except OSError:
         pass
     prev = load_session()
-    save_session({"kind": "probe", "mode": mode, "jobs": list(jobs), "holes": [list(d) for d in design],
+    save_session({"kind": "probe", "mode": mode, "fit": "centre" if centre else "rigid", "jobs": list(jobs),
+                  "holes": [list(d) for d in design],
                   "stock": list(stock) if stock else None, "sim": bool(sim), "prepared": time.time(),
                   "bay": prev.get("bay") if mode == "slots" else None,
                   "key": prev.get("key") if mode == "slots" else None})
@@ -2502,7 +2534,8 @@ def needs_stock(jobs: Sequence[str]) -> Tuple[bool, Optional[Box]]:
 
 
 def align_batch(data_path: str, jobs: Sequence[str], design: List[DesignHole], stock: Optional[Box] = None,
-                th: Optional[Dict[str, float]] = None, allow_old_data: bool = False) -> List[Tuple[str, Result]]:
+                th: Optional[Dict[str, float]] = None, allow_old_data: bool = False,
+                centre: bool = False) -> List[Tuple[str, Result]]:
     """Align every selected file with the same probe data and hole values. One file failing never
     stops the others; each gets its own _VD file (PASS) or nothing (FAIL) and its own report."""
     th = th or load_settings()
@@ -2510,7 +2543,8 @@ def align_batch(data_path: str, jobs: Sequence[str], design: List[DesignHole], s
     for job in sorted(dict.fromkeys(jobs), key=lambda p: os.path.basename(p).lower()):
         try:
             write_sidecar(job, design, stock)
-            res = run_alignment(data_path, job, design, th=th, allow_old_data=allow_old_data, stock=stock)
+            res = run_alignment(data_path, job, design, th=th, allow_old_data=allow_old_data, stock=stock,
+                                centre=centre)
         except (OSError, VDError) as e:
             res = Result(ok=False, report=f"VIRTUAL DOWEL ALIGNMENT  -  FAIL\nJob file   : {job}\n\n"
                                            f"Could not align this file:\n  {e}", out_path=None)
@@ -2983,6 +3017,8 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--stock", help='stock box when the job header has none: "W,H" or "xmin,ymin,xmax,ymax" '
                                     "(default: from <job>.vdholes.txt)")
     ap.add_argument("--allow-old-data", action="store_true", help="accept probe data older than the limit")
+    ap.add_argument("--centre", action="store_true",
+                    help="3D print: two references, placed by their midpoint and line; spacing not checked")
     ap.add_argument("--nogui", action="store_true", help="never open dialogs")
     ap.add_argument("--new-session", action="store_true",
                     help="delete aligned files written by earlier runs (vd_probe.sbp calls this first)")
@@ -3048,7 +3084,8 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"{job}: no hole coordinates: pass --holes or create " + sidecar_path(job))
                 rc = 2
                 continue
-            res = run_alignment(data, job, design, a.out, allow_old_data=a.allow_old_data, stock=stock)
+            res = run_alignment(data, job, design, a.out, allow_old_data=a.allow_old_data, stock=stock,
+                                centre=a.centre)
         except (OSError, VDError) as e:
             print(f"ERROR ({job}): {e}")
             rc = max(rc, 1)
