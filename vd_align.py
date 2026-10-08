@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.2  (2026-10-06)
+Virtual Dowel - vd_align.py  v2.2.1  (2026-10-07)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.2"
+VERSION = "2.2.1"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -519,13 +519,13 @@ def _size_match(design: Sequence[DesignHole], holes: Sequence[HoleResult], perm,
 
 def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[str, float],
           scale: float, nominal: float, centre: bool = False) -> Alignment:
-    """centre = the 3D-print fit: exactly two references. The rigid fit of two points puts the design
-    midpoint on the measured midpoint and the design line through the references on the measured line,
-    whatever their spacing. So the spacing is only reported, not checked (prints shrink), and the flip
-    checks do not apply (the part is not flipped)."""
+    """centre = the centre-and-line fit for a part that is not flipped and not exact in size (a 3D print,
+    a casting): exactly two references. The rigid fit of two points puts the design midpoint on the measured
+    midpoint and the design line through the references on the measured line, whatever their spacing. So
+    the spacing is only reported, not checked, and the flip checks do not apply."""
     n = len(design)
     if centre and n != 2:
-        raise VDError("the centre fit (3D print) uses exactly two references")
+        raise VDError("the centre fit uses exactly two references")
     if n != len(holes):
         raise VDError(f"{len(holes)} holes were probed but {n} design positions were given")
     if n > 6:
@@ -545,9 +545,9 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
                "(end over end instead of side over side) would pass unnoticed. Make the holes different "
                "sizes at least 0.1 in apart (e.g. 0.500 and 0.625 in) or add a hole off-centre")
         if centre:
-            warnings.append("both references have about the same size, so a print placed half a turn round "
-                            "passes unnoticed and the job is cut turned. Place the print the right way round "
-                            "(within the rotation limit), or print two different sizes")
+            warnings.append("both references have about the same size, so a part placed half a turn round "
+                            "passes unnoticed and the job is cut turned. Place the part the right way round "
+                            "(within the rotation limit), or make the two sizes different")
         elif th.get("allow_symmetric_layout", 0):
             warnings.append(msg)
         else:
@@ -610,7 +610,7 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
             pct = 100 * abs(err) / dd
             warnings.append(f"the references are {abs(err):.4f} ({pct:.2f} percent) "
                             f"{'farther apart' if err > 0 else 'closer together'} than in the design - normal for a "
-                            "print. Only the midpoint and the line through the references are placed; another "
+                            "3D print or a casting. Only the midpoint and the line through the references are placed; another "
                             "feature is off by about that percentage of its distance from the midpoint")
     elif worst > tol["spacing_warn"]:
         warnings.append(f"hole spacing differs from design by up to {worst:.4f} "
@@ -1494,7 +1494,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
                   allow_old_data: bool = False, stock: Optional[Box] = None, dry: bool = False,
                   centre: bool = False) -> Result:
     """dry = check only (before probing, with made-up probe data): nothing is written or deleted.
-    centre = the 3D-print fit (see align)."""
+    centre = the centre-and-line fit (see align)."""
     th = th or load_settings()
     with open(data_path, "r", encoding="latin-1", newline="") as fh:
         pd = parse_probe_data(fh.read(), data_path)
@@ -1545,7 +1545,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
     lines, nl = read_text(job_path)
     notes: List[str] = []
     if centre:
-        notes.append("Centre fit (3D print): the design midpoint between the two references is put on the "
+        notes.append("Centre fit: the design midpoint between the two references is put on the "
                      "measured midpoint and the design line through them on the measured line. The spacing "
                      "is reported, not checked.")
         mx, my = (design[0][0] + design[1][0]) / 2, (design[0][1] + design[1][1]) / 2
@@ -2239,10 +2239,10 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     vd_run.sbp (the probing routine with these settings) for ShopBot to run next.
     mode: 'holes', 'slots' (half slots, after the bay cut) or 'through' (through slots): for slots
     each one opens toward its nearest stock-box edge, which the routine needs to know.
-    centre: the 3D-print fit - two references, midpoint and line (see align)."""
+    centre: the centre-and-line fit - two references, midpoint and line (see align)."""
     errs = machine_errors(machine)
     if centre and len(design) != 2:
-        errs.append("the 3D print fit uses exactly two references")
+        errs.append("the centre fit uses exactly two references")
     elif not 2 <= len(design) <= 6:
         errs.append("enter 2 to 6 reference holes")
     if any(d[2] is None for d in design):
@@ -3018,7 +3018,8 @@ def _main(argv: Optional[Sequence[str]] = None) -> int:
                                     "(default: from <job>.vdholes.txt)")
     ap.add_argument("--allow-old-data", action="store_true", help="accept probe data older than the limit")
     ap.add_argument("--centre", action="store_true",
-                    help="3D print: two references, placed by their midpoint and line; spacing not checked")
+                    help="centre and line: two references, placed by their midpoint and line; spacing not checked "
+                         "(3D prints, castings)")
     ap.add_argument("--nogui", action="store_true", help="never open dialogs")
     ap.add_argument("--new-session", action="store_true",
                     help="delete aligned files written by earlier runs (vd_probe.sbp calls this first)")

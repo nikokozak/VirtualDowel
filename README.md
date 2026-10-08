@@ -190,25 +190,25 @@ Nothing of the half-slot mode has run on the machine yet. Please do these in ord
 
 ---
 
-## 3c. 3D prints: two references, centre and line
+## 3c. Any part by two references: centre and line
 
-Use this to finish a 3D-printed part on the machine. There is no flip. A print shrinks or grows by up to about one percent, so the distance between two references in the print is not the design distance. Virtual Dowel does not check that distance here. It puts the job's design midpoint between the two references on the measured midpoint, and turns the job so that the design line through the references lies on the measured line. A feature near the midpoint lands where it was designed. A feature at a distance r from the midpoint is off by about the shrink percentage times r.
+Use this for a part that is not flip-milled and whose size is not exact: a 3D print, a casting, a found object. There is no flip. A print shrinks or grows by up to about one percent, a casting more, so the distance between two references in the part is not the design distance. Virtual Dowel does not check that distance here. It puts the job's design midpoint between the two references on the measured midpoint, and turns the job so that the design line through the references lies on the measured line. The report gives the size difference as a percentage. A feature near the midpoint lands where it was designed. A feature at a distance r from the midpoint is off by about that percentage times r.
 
 Design rules:
-1. Print two references into the part: bores in the top face (through, or blind and deeper than the probe plunge depth under Advanced) or notches in an edge (open to the top and to the side). Make them different sizes, for example 0.5 and 0.625 in. With equal sizes a print placed half a turn round passes unnoticed, and the job is cut turned.
+1. Make two references in the part: bores in the top face (through, or blind and deeper than the probe plunge depth under Advanced) or notches in an edge (open to the top and to the side). Make them different sizes, for example 0.5 and 0.625 in. With equal sizes a part placed half a turn round passes unnoticed, and the job is cut turned.
 2. Put them on one line through the job's X0 Y0, with X0 Y0 halfway between them. The report warns when the design midpoint is not at X0 Y0.
-3. The job files are in the print's own coordinates. No side A, no side B.
+3. The job files are in the part's own coordinates. No side A, no side B.
 
 Each job:
-1. Clamp the print to the table, square within 5 degrees. Do not zero X or Y.
-2. Type C80. Choose "3D print", then "Bores in the top face" or "Notches in the edge".
-3. Add the job files. Enter the two references: X and Y of the centre (notch: of its round end) and the diameter (notch: the width). Notches need the stock box: the print's outline in job coordinates.
+1. Clamp the part to the table, square within 5 degrees. Do not zero X or Y.
+2. Type C80. Under "Locate the part with" choose "Centre and line", then "Bores in the top face" or "Notches in the edge".
+3. Add the job files. Enter the two references: X and Y of the centre (notch: of its round end) and the diameter (notch: the width). Notches need the stock box: the part's outline in job coordinates.
 4. Click Check. Fit the probe and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball about 0.3 in outside the opening, in line with the notch.
 5. The results window shows the rotation and the spacing error; the report gives the shrink as a percentage. PASS writes `<job>_VD.sbp`. Zero Z and run it.
 
 Checked: the reference sizes (within 0.06 in of the design), roundness and repeatability of each reference, rotation within 5 degrees, and the runtime checks of every `_VD` file. Not checked: the spacing between the references. Command line: add `--centre` to the align command.
 
-Not yet run on the machine. The first test: a print with two bores, a job that only drills a small mark at X0 Y0, and a ruler.
+Not yet run on the machine. The first test: a 3D print with two bores, a job that only drills a small mark at X0 Y0, and a ruler.
 
 ## 4. Safety checks built in
 

@@ -2085,7 +2085,7 @@ class TestPrepare(_Folder):
         return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim, mode=mode, centre=centre,
                                   template=os.path.join(ROOT, "vd_probe.sbp"))
 
-    def test_3d_print_two_equal_bores_end_to_end(self):
+    def test_centre_fit_two_equal_bores_end_to_end(self):
         # a Fusion job (no material size) for a print 1 percent small, turned 1.2 deg, lying at (5, 7)
         job = os.path.join(self.tmp, "print.sbp")
         shutil.copy(FUSION, job)
@@ -2107,7 +2107,7 @@ class TestPrepare(_Folder):
         self.assertAlmostEqual(r.shift[1], 7.0, delta=0.01)
         self.assertGreater(r.spacing_err, va.DEFAULTS["spacing_fail"])
         self.assertTrue(any("percent" in w for w in r.warns), r.warns)
-        self.assertIn("Centre fit (3D print)", r.report)
+        self.assertIn("Centre fit:", r.report)
         self.assertTrue(os.path.exists(va.default_out_path(job, False)))
         # the flip-milling fit refuses the same print
         r2 = va.align_batch(va.DEFAULT_DATA, [job], design)[0][1]
@@ -2617,11 +2617,13 @@ class TestWindow(_Folder):
         self.assertIn("Through slots - what to do now", report())
         a.root.destroy()
 
-    def test_3d_print_method_in_the_window(self):
+    def test_centre_method_in_the_window(self):
         a = self.app("prepare")
-        a.loc_var.set("print")
+        radios = [w.cget("text") for w in a.method_row.winfo_children() if w.winfo_class() == "TRadiobutton"]
+        self.assertEqual(radios, ["Through holes", "Half slots", "Through slots", "Centre and line"])
+        a.loc_var.set("centre")
         a._on_locate_mode()
-        self.assertIn("3D print - what to do now", a.text.get("1.0", "end"))
+        self.assertIn("Centre and line - what to do now", a.text.get("1.0", "end"))
         self.assertEqual([w.cget("text") for w in a.steps_bar.winfo_children()],
                          ["1  Prepare", "2  Probe", "3  Align", "4  Cut"])
         self.assertTrue(a.ref_frame.winfo_manager())                      # bores / notches choice is shown
@@ -2640,7 +2642,7 @@ class TestWindow(_Folder):
         va.save_session({"kind": "probe", "mode": "through", "fit": "centre", "jobs": [self.job],
                          "holes": [[-2.0, 0.0, 0.5], [2.0, 0.0, 0.5]], "stock": None, "sim": False, "prepared": 0})
         a = self.app("align")
-        self.assertEqual((a.method, a.probe_mode()), ("print", "through"))
+        self.assertEqual((a.method, a.probe_mode()), ("centre", "through"))
         a.root.destroy()
 
     def test_after_a_rough_locate_the_next_step_is_probing(self):

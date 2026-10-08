@@ -1,5 +1,5 @@
 """
-Virtual Dowel - vd_app.py  v2.2  (2026-10-06)
+Virtual Dowel - vd_app.py  v2.2.1  (2026-10-07)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
@@ -55,14 +55,15 @@ METHODS = {
               "short bay cut opens them, then the probe comes in from the side. Sizes: click Slot and bay sizes."),
     "through": ("Through slots", "Two slots in the board's edges, cut through from outside with a bit as long as the "
                 "board is thick. Use when that bit cannot be lifted above the board."),
-    "print": ("3D print", "No flip. A printed part is placed by two references - bores in its top or notches in its "
-              "edge - on a line through the job's X0 Y0, halfway between them. Prints shrink, so their spacing is "
-              "reported but not checked: the job goes to the midpoint, turned to the line."),
+    "centre": ("Centre and line", "No flip. Any part - a 3D print, a casting, a found object - is placed by two "
+               "references: bores in its top face or notches in its edge, on a line through the job's X0 Y0, halfway "
+               "between them. Their spacing is reported, not checked, so a part that shrank or grew still goes to "
+               "the midpoint, turned to the line."),
 }
 STEPS = {"holes": ("Prepare", "Probe", "Align", "Cut side B"), "through": ("Prepare", "Probe", "Align", "Cut side B"),
          "slots": ("Prepare", "Rough locate", "Cut bays", "Probe", "Align", "Cut side B"),
-         "print": ("Prepare", "Probe", "Align", "Cut")}
-REFS = {"holes": "Bores in the top face", "through": "Notches in the edge"}     # 3D print: what the references are
+         "centre": ("Prepare", "Probe", "Align", "Cut")}
+REFS = {"holes": "Bores in the top face", "through": "Notches in the edge"}     # centre and line: the references
 
 NEXT = {
     "holes": """Through holes - what to do now
@@ -97,19 +98,19 @@ NEXT = {
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE and click Start probing. At each slot, jog the probe ball about 0.3 in (8 mm)
      outside the opening, in line with the slot.""",
-    "print": """3D print - what to do now
-  Before this: the print has two references of different sizes - bores in its top face or notches in its edge -
-  on one line through the job's X0 Y0, with X0 Y0 halfway between them. No flip: the job is in the print's
-  own coordinates. Clamp the print square to the table, within 5 degrees.
-  1. Add files: the job files that finish the print, one per tool.
+    "centre": """Centre and line - what to do now
+  Before this: the part has two references of different sizes - bores in its top face or notches in its edge -
+  on one line through the job's X0 Y0, with X0 Y0 halfway between them. No flip: the job is in the part's
+  own coordinates. Clamp the part square to the table, within 5 degrees.
+  1. Add files: the job files for the part, one per tool.
   2. References: choose bores or notches. Enter each: X and Y of its centre (notch: round-end centre) and
      its diameter (notch: width), in job coordinates. Exactly two.
-  3. Stock box: the print's outline in job coordinates. Notches need it (which edge each opens to).
+  3. Stock box: the part's outline in job coordinates. Notches need it (which edge each opens to).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball
      about 0.3 in (8 mm) outside the opening, in line with the notch.
-  The distance between the references is reported, not checked - prints shrink. Only the midpoint and the
-  line through them are placed.""",
+  The distance between the references is reported, not checked - a 3D print shrinks, a casting too. Only
+  the midpoint and the line through them are placed.""",
 }
 
 
@@ -206,12 +207,12 @@ class App:
         self.steps_bar = ttk.Frame(outer)
         self.steps_bar.pack(fill="x", pady=(0, 8))
         self.loc_var = tk.StringVar(value="holes")
-        self.ref_var = tk.StringVar(value="holes")       # 3D print: bores (holes) or notches (through)
+        self.ref_var = tk.StringVar(value="holes")       # centre and line: bores (holes) or notches (through)
         if self.mode == "prepare":
-            lf = ttk.Frame(outer)
+            lf = self.method_row = ttk.Frame(outer)
             lf.pack(fill="x", pady=(0, 2))
-            ttk.Label(lf, text="Locate side B with", font=("Segoe UI", 10, "bold")).pack(side="left")
-            for val in ("holes", "slots", "through"):
+            ttk.Label(lf, text="Locate the part with", font=("Segoe UI", 10, "bold")).pack(side="left")
+            for val in METHODS:
                 ttk.Radiobutton(lf, text=METHODS[val][0], value=val, variable=self.loc_var,
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
             ttk.Button(lf, text="Thick-stock guide", command=self.on_guide).pack(side="right")
@@ -378,7 +379,7 @@ class App:
             self.rough_btn.pack(side="right", padx=(0, 6))
         else:
             self.bay_frame.pack_forget()
-        if self.method == "print":
+        if self.method == "centre":
             self.ref_frame.pack(fill="x", pady=(0, 6), after=self.method_note)
         else:
             self.ref_frame.pack_forget()
@@ -386,14 +387,14 @@ class App:
         self.show_next_steps()
 
     def probe_mode(self) -> str:
-        """What the routine probes: holes, slots (half slots) or through (slots). A 3D print uses bores or notches."""
-        return self.ref_var.get() if self.method == "print" else self.method
+        """What the routine probes: holes, slots (half slots) or through (slots). Centre and line: bores or notches."""
+        return self.ref_var.get() if self.method == "centre" else self.method
 
     def _set_method(self, method: str) -> None:
         """Labels that depend on holes or slots, and the step bar."""
         self.method = method if method in METHODS else "holes"
         slots = self.probe_mode() != "holes"
-        if self.method == "print":
+        if self.method == "centre":
             title = ("References - X and Y of the centre (notch: round-end centre) and the diameter (notch: width) "
                      "- job coordinates")
         elif slots:
@@ -762,7 +763,7 @@ class App:
             for v, s in zip(self.stock_vars, stock):
                 v.set(_fmt(s))
         probe_mode = sess.get("mode") or ("slots" if self.pd is not None and self.pd.open else "holes")
-        self.loc_var.set("print" if sess.get("fit") == "centre" else probe_mode)
+        self.loc_var.set("centre" if sess.get("fit") == "centre" else probe_mode)
         self.ref_var.set(probe_mode if probe_mode in REFS else "holes")
         self.bay_var.set(sess.get("bay") or "")
         key = sess.get("key")
@@ -963,7 +964,7 @@ class App:
             self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
             self._set_status("Not ready", RED)
             return False
-        checks = va.precheck_jobs(self.jobs, holes, stock, m["tip"], centre=self.method == "print")
+        checks = va.precheck_jobs(self.jobs, holes, stock, m["tip"], centre=self.method == "centre")
         lines = self._show_checks(checks)
         ok = all(r.ok for _, r in checks)
         nxt = ("Fit the bay cutter and click Start rough locate." if self.method == "slots" and not self.stage2
@@ -981,7 +982,7 @@ class App:
             return
         sim = bool(self.sim_var.get())
         prep = va.prepare_probing(self.jobs, holes, stock, m, sim=sim, mode=self.probe_mode(),
-                                  centre=self.method == "print")
+                                  centre=self.method == "centre")
         if not prep.ok:
             lines = self._show_checks(prep.checks)
             self._set_text("Not started:\n\n" + "\n".join("  - " + e for e in prep.errors)
@@ -1113,7 +1114,7 @@ class App:
             if not allow_old:
                 return
         results = va.align_batch(self.data_path, self.jobs, holes, stock, th=th, allow_old_data=allow_old,
-                                 centre=self.method == "print")
+                                 centre=self.method == "centre")
         for job, r in results:
             self.results[job] = r
             rot = f"{r.rotation_deg:+.3f}°" if r.rotation_deg is not None else ""
