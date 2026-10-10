@@ -292,6 +292,17 @@ class TestSelftestFile(unittest.TestCase):
 
 
 # =====================================================================================
+class TestDoubleClick(unittest.TestCase):
+    """Double-clicking vd_app.py on the shop PC must open the prepare window, not flash a console and quit.
+    It runs vd_align.py's entry; --help proves the hand-over without opening a window."""
+
+    def test_vd_app_run_as_a_script_hands_over_to_vd_align(self):
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "vd_app.py"), "--help"],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Virtual Dowel", r.stdout)
+
+
 class TestInstall(unittest.TestCase):
     """vd_install.bat -> vd_align.py --install: point the SB3 files at wherever the folder lives."""
 

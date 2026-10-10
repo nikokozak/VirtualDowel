@@ -16,7 +16,7 @@ You don't square the board to the machine, and you don't zero X or Y on side B.
 VirtualDowel\
   vd_probe.sbp     probing routine - the window fills in its settings (template)
   vd_align.py      alignment script (Python 3, standard library only)
-  vd_app.py        the Virtual Dowel window
+  vd_app.py        the Virtual Dowel window (double-click it to open the prepare window without ShopBot)
   vd_align.bat     double-click to open the window on the last probe data
   vd_selftest.sbp  offline check of SB3 behaviour (Preview mode, no motion)
   vd_install.bat   double-click once: points the .sbp files at this folder
@@ -353,6 +353,7 @@ Anything the script refuses, it tells you why. Send me those lines.
 |---|---|
 | C80 does nothing, or "Invalid command" | The custom cut wasn't installed (see the installer output) or SB3 looks elsewhere for custom cuts. Use `FP` → `vd_start.sbp` instead; it does the same. |
 | The window opens, but probing doesn't start after *Start probing* | ShopBot didn't run `FP` from inside the custom cut. Run `FP` → `vd_run.sbp` by hand, and tell me. |
+| A console flashes and closes when you double-click a `.py` file | Before 2.2.2 `vd_app.py` did nothing when run directly; from 2.2.2 it opens the prepare window. The normal start is `C80` in ShopBot. If the console still closes at once, look at `vd_launch.log` in the folder and send it to me. If the log got no new line, Python itself did not start: reinstall it from python.org with "Add python.exe to PATH" ticked, then run `vd_install.bat` again. |
 | No window after probing | Double-click `vd_align.bat`. It uses the new probe data. `vd_launch.log` in the folder records every start and why it stopped; send it to me. |
 | A command prompt opens and stays open during a ShopBot file | SHELL passed a changed command (see "Confirmed on your SB3"). Type `echo %cmdcmdline%`, send me what it prints, then type `exit`. |
 | "probe reads DEFLECTED or unplugged" | Check the cable, then run the probe calibration to find the input and its state. |

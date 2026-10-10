@@ -1,5 +1,5 @@
 """
-Virtual Dowel - vd_app.py  v2.2.1  (2026-10-07)
+Virtual Dowel - vd_app.py  v2.2.2  (2026-10-10)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
@@ -1165,3 +1165,8 @@ def run(mode: str, data_path: Optional[str] = None) -> int:
         raise
     app.root.mainloop()
     return app.result_code
+
+
+if __name__ == "__main__":
+    # double-clicked: the same as "vd_align.py prepare", logged in vd_launch.log
+    sys.exit(va.main(sys.argv[1:] or ["prepare"]))

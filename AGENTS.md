@@ -38,7 +38,7 @@ git archive --format=zip --prefix=VirtualDowel/ -o VirtualDowel-2.2.1.zip HEAD v
 git tag -a v2.2.1 -m "Virtual Dowel 2.2.1" && git push origin v2.2.1 && gh release create v2.2.1 VirtualDowel-2.2.1.zip --title "Virtual Dowel 2.2.1" --notes-file notes.md
 ```
 
-Expected test result: `OK` (166 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (167 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
