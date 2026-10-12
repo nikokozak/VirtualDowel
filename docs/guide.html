@@ -359,7 +359,7 @@ footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule);
   <tr><td>Bay reach</td><td>&rho; + clearance radius + 0.4, past the round-end centre</td><td>1.113</td></tr>
   <tr><td>Bay depth</td><td>stock thickness &minus; bay floor</td><td>1.400</td></tr>
   <tr><td>Slot width</td><td>ball + 2 &times; (sideways drift of the end search on a 5&deg; board + 0.1)</td><td>&ge; 0.593</td></tr>
-  <tr><td>Slot length</td><td>round-end centre at least 0.75 in inside the real edge, plus the edge tolerance</td><td>&ge; 0.900</td></tr>
+  <tr><td>Slot length</td><td>round-end centre at least 0.25 in inside the real edge, plus the slot width difference and the edge tolerance</td><td>&ge; 0.463</td></tr>
   <tr><td>Slot widths</td><td>differ by at least 0.1</td><td>0.625, 0.75</td></tr>
   <tr><td>End-search length</td><td>longest slot + edge tolerance + &rho; (the routine's setting <code>&amp;vd_slen</code>)</td><td>1.713 of 2.5</td></tr>
 </table>
@@ -375,7 +375,7 @@ footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule);
   <li><span class="where">Bay cut</span>The window places the bay file as <code>&lt;bay file&gt;_VDROUGH.sbp</code>. Look at it in Preview. Zero Z, then run it.</li>
   <li><span class="where">Clean</span>Vacuum the slots and bays. A chip on a wall moves a touch.</li>
   <li><span class="where">Probe</span>Fit the probe and plug in its cable.</li>
-  <li class="machine"><span class="where">Probe the slots</span>Type <code>C80</code> and click <b>Start probing (probe in)</b>. For each slot, jog the probe ball to about 0.3 in outside the opening, in line with the slot, inside the park height band, and confirm. The routine does the rest (<a href="#routine">section 7</a>).</li>
+  <li class="machine"><span class="where">Probe the slots</span>Type <code>C80</code> and click <b>Start probing (probe in)</b>. For each slot, jog the probe ball to outside the opening, anywhere up to 1 in out, in line with the slot, inside the park height band, and confirm. The routine does the rest (<a href="#routine">section 7</a>).</li>
   <li><span class="where">Align</span>The window aligns the side-B files: PASS writes <code>&lt;job&gt;_VD.sbp</code>.</li>
   <li><span class="where">Cut side B</span>Fit each cutter, zero Z only, and run each <code>_VD.sbp</code>.</li>
 </ol>
@@ -386,7 +386,7 @@ footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule);
 <figure>
 <svg viewBox="0 0 900 460" role="img" aria-labelledby="f3t f3d">
   <title id="f3t">One slot and its bay, top view, with the probe's moves</title>
-  <desc id="f3d">The probe ball is parked outside the slot opening. It moves a little way in, finds the two slot walls and centres on them, searches along the slot for the round end, backs off onto the straight part, touches wall, wall and end on each pass, and backs out. The dashed circles show the probe body, which stays inside the bay.</desc>
+  <desc id="f3d">The probe ball is parked outside the slot opening, up to an inch out. It moves in along the slot; a short slot's round end may be touched on the way, and then it backs off by the half width. It finds the two slot walls and centres on them, searches along the slot for the round end, backs off onto the straight part, touches wall, wall and end on each pass, and backs out the way it came.</desc>
   <defs>
     <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9" fill="none" stroke="var(--probe)" stroke-width="1.6"/></marker>
   </defs>
@@ -422,17 +422,17 @@ footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule);
   <g><circle cx="350" cy="250" r="10" class="num"/><text x="350" y="250" class="t-num">3</text></g>
   <g><circle cx="423" cy="196" r="10" class="num"/><text x="423" y="196" class="t-num">4</text></g>
   <g><circle cx="376" cy="176" r="10" class="num"/><text x="376" y="176" class="t-num">5</text></g>
-  <text x="30" y="300" class="t-probe">park: 0.3 outside,</text>
+  <text x="30" y="300" class="t-probe">park: up to 1 in outside,</text>
   <text x="30" y="317" class="t-probe">in line with the slot</text>
 </svg>
 <figcaption><b>Figure 3.</b> One slot and its bay on side B, top view, to the scale of the worked example. The numbers match the steps below.</figcaption>
 </figure>
 
 <ol class="steps">
-  <li>Move 0.6 in into the opening. Nothing may be touched. A touch means the slot is too short or the park is off-line.</li>
-  <li>Look for the two slot walls across the opening and centre on them. No walls means the ball is too high, in the bay, or not at the opening. This check comes first, so that the probe body can never reach the end of the bay.</li>
-  <li>Search along the slot for the round end. It must be at least the back-off distance + 0.1 in further in, or the slot is too short.</li>
-  <li>Back off onto the straight part of the slot.</li>
+  <li>Move 1.2 in into the opening from wherever you parked. In a short slot the round end is touched on the way: then the probe backs off by the slot's half width plus 0.08 in, which puts it on the straight part. A touch on the edge face, because the park was off-line, is caught at the next step.</li>
+  <li>Look for the two slot walls across the slot and centre on them. The first search is short, so that in a bay the probe body cannot reach the bay side; the search for the other wall crosses the whole width. No walls means the ball is too high, in the bay, off-line, or parked more than an inch out. This check comes before the long search, so that the probe body can never reach the end of the bay.</li>
+  <li>Search along the slot for the round end.</li>
+  <li>Back off by the half width plus 0.08 in: the wall touches land 0.08 in behind the round end, whatever the park distance was.</li>
   <li>One coarse and then the fine passes: wall, wall, end. Then back out to the park point.</li>
 </ol>
 <p>With spin-180 on, the routine asks you to turn the spindle by hand after each slot and probes it again. That cancels stylus runout.</p>
@@ -485,9 +485,7 @@ footer { margin-top: 70px; padding-top: 12px; border-top: 1px solid var(--rule);
 <h2 id="messages">10. Messages and what to do</h2>
 <table class="rules">
   <tr><th>Message</th><th>Cause</th><th>Do this</th></tr>
-  <tr><td>The probe touched something right at the slot opening.</td><td>Parked off-line, or the slot is very short.</td><td>Park in line with the slot, about 0.3 in out from the edge.</td></tr>
-  <tr><td>No slot walls at the opening.</td><td>The ball is in the bay (too high), or not at the opening.</td><td>Park lower, inside the park height band.</td></tr>
-  <tr><td>The slot end is too close to its opening.</td><td>The round end is less than about 0.75 in inside the real edge.</td><td>Cut longer slots on the next job.</td></tr>
+  <tr><td>No slot walls found.</td><td>The ball is in the bay (too high), off-line, or parked more than an inch out.</td><td>Park in line with the slot, less than an inch out, inside the park height band.</td></tr>
   <tr><td>No contact within the search distance.</td><td>The slot is longer than the end-search length, or the probe did not trigger.</td><td>Check the probe; raise <code>&amp;vd_slen</code> as the size calculator says.</td></tr>
   <tr><td>This does not look like the bay file.</td><td>A file with cuts away from the slots was chosen as the bay file.</td><td>Choose the bay file.</td></tr>
   <tr><td>Slot <i>n</i> was probed as opening toward ...</td><td>The slot coordinates or the stock box do not match the side the slot opens to.</td><td>Check the slot X, Y and the stock box (side-B coordinates).</td></tr>

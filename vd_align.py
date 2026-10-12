@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.3  (2026-10-12)
+Virtual Dowel - vd_align.py  v2.4  (2026-10-12)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.3"
+VERSION = "2.4"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,6 +83,7 @@ DIST_KEYS = {"spacing_warn", "spacing_fail", "residual_warn", "residual_fail", "
              "symmetry_tol", "mirror_shift_warn_only", "slot_wall_margin", "rough_spacing_fail", "bay_reach"}
 
 DesignHole = Tuple[float, float, Optional[float]]     # x, y, diameter (None = not given)
+SLOT_MIN_LEN = 0.25     # in: a half slot's round-end centre inside the stock-box edge (wall touches 0.08 behind it)
 
 
 # --------------------------------------------------------------------------------------
@@ -2276,6 +2277,14 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
         return Prepared(False, ["the side-B files mix inches and mm - align the inch and mm files separately"], [])
     to_in = 1 / 25.4 if units == {1} else 1.0          # the routine's settings are in inches
     errs = hole_errors(design, machine["tip"] / to_in, scale=1 / to_in)
+    if mode != "holes":
+        box = slot_box(jobs, stock)
+        for i, d in enumerate(design, 1):
+            ox, oy = slot_opening(d, box)
+            if math.hypot(d[0] - ox, d[1] - oy) < SLOT_MIN_LEN / to_in - 1e-9:
+                errs.append(f"slot {i}: its round-end centre is only {math.hypot(d[0] - ox, d[1] - oy):.3f} inside "
+                            f"the stock-box edge - it must be at least {SLOT_MIN_LEN / to_in:g} (the wall touches "
+                            "are made 0.08 in behind the round end)")
     if errs:
         return Prepared(False, errs, [])
     checks = precheck_jobs(jobs, design, stock, machine["tip"], centre=centre)
@@ -2634,8 +2643,9 @@ def slot_bay_sizes(ball: float, stem: float, free: float, body: float, length: f
     rho_min = (min(widths) - ball) / 2
     half = rho_max + (body / 2 if body_in_bay else stem / 2) + 0.4 * k
     l_max = slot_length + edge_tol
-    # the end search runs along a machine axis: on a turned board it drifts sideways over the slot length
-    min_w = ball + (2 * tan * (l_max - 0.1 * k) + 0.2 * k) / (1 - tan)
+    # the first move in (1.2 in) and the end search run along a machine axis: on a turned board the ball
+    # drifts sideways over that length, and the park may be 0.1 off the line
+    min_w = ball + (2 * tan * max(l_max - 0.1 * k, 1.2 * k) + 0.2 * k) / (1 - tan)
     for i, w in enumerate(widths, 1):
         if w < min_w - 1e-9:
             problems.append(f"slot {i} is narrower ({w:g}) than {min_w:.3f} {u}: on a board turned "
@@ -2643,10 +2653,14 @@ def slot_bay_sizes(ball: float, stem: float, free: float, body: float, length: f
     ws = sorted(widths)
     if any(b - a < 0.1 * k - 1e-9 for a, b in zip(ws, ws[1:])):
         problems.append(f"the slot widths must differ by at least {0.1 * k:g} {u}, so a wrong flip is caught")
-    min_len = max(0.75 * k, 0.58 * k + rho_max - rho_min) + edge_tol
+    # the wall touches are made 0.08 in behind the round end (back-off from the end touch), whatever the park
+    # point: the ball must still be inside the real edge by its radius and a little. The widest slot sets
+    # the back-off, so a narrower slot's touches are farther behind its round end.
+    min_len = SLOT_MIN_LEN * k + rho_max - rho_min + edge_tol
     if slot_length < min_len - 1e-9:
         problems.append(f"the slots are too short: the round-end centre must be at least {min_len:.3f} {u} in from "
-                        f"the stock-box edge ({min_len - edge_tol:.3f} plus the edge tolerance)")
+                        f"the stock-box edge ({SLOT_MIN_LEN * k:g} plus the slot width difference plus the edge "
+                        "tolerance)")
     need = l_max + rho_max
     if need > search + 1e-9:
         problems.append(f"the slots are longer than the end-search length reaches: set the end-search length "

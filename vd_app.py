@@ -1,5 +1,5 @@
 """
-Virtual Dowel - vd_app.py  v2.3  (2026-10-12)
+Virtual Dowel - vd_app.py  v2.4  (2026-10-12)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
@@ -87,8 +87,8 @@ NEXT = {
   1. If not done yet: in ShopBot, FP that file. Look at it in Preview, zero Z with the bay cutter
      (do NOT zero X or Y) and run it.
   2. Vacuum the slots. Fit the PROBE and plug in its cable.
-  3. Click Start probing. At each slot, jog the probe ball about 0.3 in (8 mm) outside the opening,
-     in line with the slot, at the park height from Slot and bay sizes.
+  3. Click Start probing. At each slot, jog the probe ball outside the opening - anywhere up to 1 in
+     (25 mm) out - in line with the slot, at the park height from Slot and bay sizes.
   To place the bay file again instead, click Start rough locate.""",
     "through": """Through slots - what to do now
   Before this: side A has cut two slots through the board in its edges, on the flip axis, of different widths.
@@ -96,8 +96,8 @@ NEXT = {
   2. Enter each slot: X and Y of its round-end centre and its width, in side-B coordinates.
   3. Stock box: needed unless a file states its stock size (the note says).
   4. Click Check and fix anything marked FAIL.
-  5. Fit the PROBE and click Start probing. At each slot, jog the probe ball about 0.3 in (8 mm)
-     outside the opening, in line with the slot.""",
+  5. Fit the PROBE and click Start probing. At each slot, jog the probe ball outside the opening -
+     anywhere up to 1 in (25 mm) out - in line with the slot.""",
     "centre": """Centre and line - what to do now
   Before this: the part has two references of different sizes - bores in its top face or notches in its edge -
   on one line through the job's X0 Y0, with X0 Y0 halfway between them. No flip: the job is in the part's
@@ -108,7 +108,7 @@ NEXT = {
   3. Stock box: the part's outline in job coordinates. Notches need it (which edge each opens to).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball
-     about 0.3 in (8 mm) outside the opening, in line with the notch.
+     outside the opening - up to 1 in (25 mm) out - in line with the notch.
   The distance between the references is reported, not checked - a 3D print shrinks, a casting too. Only
   the midpoint and the line through them are placed.""",
 }

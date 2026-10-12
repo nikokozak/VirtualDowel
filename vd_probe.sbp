@@ -1,5 +1,5 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.3  (2026-10-12)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.4  (2026-10-12)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
 ' Finds the centers of two or more reference through-holes - or half slots
@@ -82,8 +82,9 @@ IF &vd_units = 1 THEN &vd_u = 25.4
 &vd_slen = &vd_slen * &vd_u
 'half slots - after finding the round end back off this far - the wall touches are made on the straight part
 &vd_back = &vd_r + 0.08 * &vd_u
-'half slots - first move in from the park point - then the slot walls are checked there
-&vd_sentry = 0.6 * &vd_u
+'half slots - first move in from the park point - 1.2 inch so a park up to 1 inch out still ends inside the slot
+'a short slot may end sooner - that touch is handled - the walls are checked after it
+&vd_sentry = 1.2 * &vd_u
 'half slots - the wall check at the opening searches only a little past the widest slot - so in a bay
 'the probe body cannot reach the bay walls - the bay is wider by the body radius plus 0.4 inch
 &vd_sopen = &vd_r + 0.15 * &vd_u
@@ -561,7 +562,7 @@ RETURN
 vd_locate_slot:
 IF &vd_sim = 1 THEN GOTO vd_locate_slot_sim
 PRINT "Virtual Dowel - slot "; &vd_h; " of "; &vd_nholes
-MSGBOX(Jog the probe ball OUTSIDE the next slot opening - in line with the slot - 0.3 inch or 8 mm out from the edge - at mid slot height below the bay floor. Use slow keypad speed. Press ESC when done.,64,Virtual Dowel)
+MSGBOX(Jog the probe ball OUTSIDE the slot opening - in line with the slot - less than 1 inch or 25 mm out from the edge - at mid slot height below the bay floor. Use slow keypad speed. Press ESC when done.,64,Virtual Dowel)
 SK
 MSGBOX(Is the probe ball outside the slot opening - in line with the slot and below the bay floor? Yes to probe it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
 IF &msganswer = "No" THEN GOTO vd_locate_slot
@@ -572,12 +573,12 @@ IF &msganswer = "Cancel" THEN GOTO vd_abort
 RETURN
 vd_locate_slot_sim:
 INPUT "SIMULATION - type X then Y then width of the round end of this slot with commas between them" &vd_sx, &vd_sy, &vd_sd
-'synthetic slot - true center deliberately offset from what was typed - parked 1 inch outside it
+'synthetic slot - true center deliberately offset from what was typed - parked 1.5 inch outside it
 &vd_shx = &vd_sx + 0.020 * &vd_u
 &vd_shy = &vd_sy - 0.012 * &vd_u
 &vd_rs = (&vd_sd - &vd_tip) / 2
-&vd_x0 = &vd_sx - &vd_ix * &vd_u
-&vd_y0 = &vd_sy - &vd_iy * &vd_u
+&vd_x0 = &vd_sx - &vd_ix * 1.5 * &vd_u
+&vd_y0 = &vd_sy - &vd_iy * 1.5 * &vd_u
 &vd_z0 = %(3)
 RETURN
 '
@@ -591,46 +592,74 @@ GOSUB vd_moveto
 &vd_yc = &vd_y0
 &vd_inhole = 2
 &vd_spd = &vd_fast
-'move a little way into the opening - nothing may be touched yet
+'first move in from the park - a touch is the round end of a short slot - or the edge face if parked off line
 &vd_ax = &vd_sao
 &vd_sg = &vd_sin
 &vd_dist = &vd_sentry
 GOSUB vd_touch
-IF &vd_hit = 1 THEN GOTO vd_err_open
+IF &vd_hit = 1 THEN GOTO vd_slot_hit1
 'no contact - so the move ran to its end - vd_touch leaves the position variables unchanged then
 &vd_px = &vd_tx
 &vd_py = &vd_ty
-'the slot walls must be there - else the ball is in the bay or not at the opening - then centre on them
+GOTO vd_slot_walls
+vd_slot_hit1:
+'back off along the slot by the half width plus 0.08 inch - if that was the round end the ball is now on the straight part
+&vd_mx = &vd_cx - &vd_ix * &vd_back
+&vd_my = &vd_cy - &vd_iy * &vd_back
+GOSUB vd_moveto
+vd_slot_walls:
+'the slot walls must be there - else the ball is in the bay - off line - or parked more than 1 inch out - then centre on them
+'the first search is short so that in a bay the probe body cannot reach the bay side - the nearer wall is always within it
+'the search for the other wall crosses the whole slot width - on a turned board the ball drifts toward one wall
 &vd_xc = &vd_px
 &vd_yc = &vd_py
 &vd_ax = &vd_sac
 &vd_sg = 1
 &vd_dist = &vd_sopen
 GOSUB vd_touch
+IF &vd_hit = 1 THEN GOTO vd_slot_wplus
+'no wall on the plus side within the short search - back to the start - the minus wall must then be near
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_sg = -1
+&vd_dist = &vd_sopen
+GOSUB vd_touch
 IF &vd_hit = 0 THEN GOTO vd_err_nowalls
+&vd_p2 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+&vd_mx = &vd_xc
+&vd_my = &vd_yc
+GOSUB vd_moveto
+&vd_sg = 1
+&vd_dist = &vd_swide
+GOSUB vd_touch
+IF &vd_hit = 0 THEN GOTO vd_err_nowalls
+&vd_p1 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+GOTO vd_slot_wmid
+vd_slot_wplus:
 &vd_p1 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
 &vd_mx = &vd_xc
 &vd_my = &vd_yc
 GOSUB vd_moveto
 &vd_sg = -1
+&vd_dist = &vd_swide
 GOSUB vd_touch
 IF &vd_hit = 0 THEN GOTO vd_err_nowalls
 &vd_p2 = &vd_cx * (2 - &vd_sac) + &vd_cy * (&vd_sac - 1)
+vd_slot_wmid:
 &vd_mid = (&vd_p1 + &vd_p2) / 2
 &vd_xc = &vd_xc + (&vd_mid - &vd_xc) * (2 - &vd_sac)
 &vd_yc = &vd_yc + (&vd_mid - &vd_yc) * (&vd_sac - 1)
 &vd_mx = &vd_xc
 &vd_my = &vd_yc
 GOSUB vd_moveto
-'find the round end - a guarded move in along the slot from the centre of the opening
+'find the round end - a guarded move in along the slot from its centre line
 &vd_ax = &vd_sao
 &vd_sg = &vd_sin
 &vd_dist = &vd_slen
 GOSUB vd_touch
 IF &vd_hit = 0 THEN GOTO vd_err_miss
-'the wall touches go a back-off distance before the end - that must still be inside the slot
-IF &vd_trav < &vd_back + 0.1 * &vd_u THEN GOTO vd_err_short
-'back off onto the straight part of the slot - the wall touches are made there
+'back off by the half width plus 0.08 inch - on the straight part whatever the park point was - the wall touches are made there
 &vd_xc = &vd_cx - &vd_ix * &vd_back
 &vd_yc = &vd_cy - &vd_iy * &vd_back
 &vd_mx = &vd_xc
@@ -721,14 +750,8 @@ RETURN
 vd_err_miss:
 MSGBOX(No contact within the search distance. Park closer to the hole center - or in line with the half slot below the bay floor. Check the vd_hole setting and that the probe triggers. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
-vd_err_open:
-MSGBOX(The probe touched something right at the slot opening. Park in line with the slot and 0.3 inch or 8 mm out from the edge. The slot may be too short. Probing aborted.,16,Virtual Dowel)
-GOTO vd_lift_abort
-vd_err_short:
-MSGBOX(The slot end is too close to its opening. The round end must be at least 0.75 inch or 19 mm inside the edge. Probing aborted.,16,Virtual Dowel)
-GOTO vd_lift_abort
 vd_err_nowalls:
-MSGBOX(No slot walls at the opening. Park the ball 0.3 inch or 8 mm out from the edge - in line with the slot - at mid slot height below the bay floor. Probing aborted.,16,Virtual Dowel)
+MSGBOX(No slot walls found. Park the ball less than 1 inch or 25 mm out from the edge - in line with the slot - at mid slot height below the bay floor. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_err_pretrig:
 MSGBOX(The probe reads DEFLECTED before a move. Probing aborted.,16,Virtual Dowel)

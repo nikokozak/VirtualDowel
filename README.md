@@ -165,11 +165,11 @@ py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 
 
 **Each job.**
 
-1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. Enter the X and Y of each round-end centre in side-B coordinates. Zero X/Y at the Setup 1 WCS corner and run side A.
+1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. The round-end centre must be at least 0.25 in inside the edge, plus the slot width difference; the size calculator says the exact number. Enter the X and Y of each round-end centre in side-B coordinates. Zero X/Y at the Setup 1 WCS corner and run side A.
 2. Flip and clamp. Keep the slot openings free.
 3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate side B with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter in)**. Jog the bit tip over each slot opening (slot 1, then slot 2; the key notch last, if you cut one).
 4. The window says which file to run: `<bay file>_VDROUGH.sbp`. Look at it in Preview, zero Z with the bay cutter, and run it. Do not zero X or Y.
-5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe in)**. At each slot, jog the probe ball about 0.3 in outside the opening, in line with the slot, at the park height from the size calculator.
+5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe in)**. At each slot, jog the probe ball outside the opening, anywhere up to 1 in out, in line with the slot, at the park height from the size calculator. The routine finds the round end first, so the exact distance does not matter.
 6. The window aligns the side-B files as usual. Fit each cutter, zero Z only, and run each `_VD.sbp`.
 
 **Through slots** (a bit as long as the board is thick, but not the Z travel to lift it over the board): cut the slots through from outside on side A, choose **Through slots**, and go straight to step 5.
@@ -206,7 +206,7 @@ Each job:
 1. Clamp the part to the table, square within 5 degrees. Do not zero X or Y.
 2. Type C80. Under "Locate the part with" choose "Centre and line", then "Bores in the top face" or "Notches in the edge".
 3. Add the job files. Enter the two references: X and Y of the centre (notch: of its round end) and the diameter (notch: the width). Notches need the stock box: the part's outline in job coordinates.
-4. Click Check. Fit the probe and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball about 0.3 in outside the opening, in line with the notch.
+4. Click Check. Fit the probe and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball outside the opening, up to 1 in out, in line with the notch.
 5. The results window shows the rotation and the spacing error; the report gives the shrink as a percentage. PASS writes `<job>_VD.sbp`. Zero Z and run it.
 
 Checked: the reference sizes (within 0.06 in of the design), roundness and repeatability of each reference, rotation within 5 degrees, and the runtime checks of every `_VD` file. Not checked: the spacing between the references. Command line: add `--centre` to the align command.

@@ -1754,11 +1754,29 @@ class TestSlotRoutine(unittest.TestCase):
         pd, holes, al = self.fit(vm)
         self.assert_recovers(al, deg, t, 0.0015)
 
-    def test_slot_end_too_close_to_the_edge_aborts_and_backs_out(self):
-        short = [(0.1, 15.0, 0.625, (1, -1)), SLOTS_B[1]]
-        vm, m, ui, parks = slot_run(0.5, (1.0, 1.0), slots=short)
+    def test_short_slots_work_from_any_park_distance(self):
+        # round-end centre 0.5 in inside the edge (Nikolai's slots): the first move touches the end, the
+        # back-off puts the wall touches 0.08 in behind the round end whatever the park distance was
+        short = [(0.5, 15.0, 0.625, (1, -1)), (23.5, 15.0, 0.75, (1, 1))]
+        design = [sv[:3] for sv in short]
+        for park_out in (0.05, 0.3, 0.6, 0.95):
+            e = park_out - 0.3                             # slot 1 opens -X, slot 2 opens +X
+            vm, m, ui, _ = slot_run(1.0, (0.4, -0.2), slots=short, park_err=((-e, 0.03), (e, -0.02)))
+            self.assertEqual(m.collisions, [], park_out)
+            pd = va.parse_probe_data(data_text(vm))
+            holes = va.compute_holes(pd)[0]
+            first = va.align(design, holes, va.DEFAULTS, 1.0, pd.nominal)
+            holes = va.compute_holes(pd, first.fit.theta)[0]
+            al = va.align(design, holes, va.DEFAULTS, 1.0, pd.nominal)
+            self.assertEqual(al.failures + va.hole_checks(pd, holes, (0, 0), va.DEFAULTS)[0], [], park_out)
+            self.assert_recovers(al, 1.0, (0.4, -0.2), 0.0015)
+            for h in holes:
+                self.assertGreater(h.wall_margin, 0.05, park_out)      # on the straight part, behind the round end
+
+    def test_parked_more_than_an_inch_out_aborts_and_backs_out(self):
+        vm, m, ui, parks = slot_run(0.5, (1.0, 1.0), park_err=((-1.0, 0.03), (1.0, -0.02)))
         self.assertEqual(m.collisions, [])
-        self.assertTrue(any("too close to its opening" in msg for msg in ui.messages), ui.messages)
+        self.assertTrue(any("No slot walls" in msg for msg in ui.messages), ui.messages)
         self.assertLess(math.dist((m.x, m.y), parks[0][:2]), 0.002)
         with self.assertRaises(va.ProbeDataError):
             va.parse_probe_data(data_text(vm))
@@ -1849,7 +1867,7 @@ class TestSizeCalculator(unittest.TestCase):
             (dict(length=1.4), "collet nut"),
             (dict(widths=[0.5, 0.75]), "slot 1 is narrower"),
             (dict(widths=[0.7, 0.75]), "differ by"),
-            (dict(slot_length=0.8), "too short"),
+            (dict(slot_length=0.4), "too short"),
             (dict(slot_length=2.6), "end-search length"),
             (dict(bay_width=1.8), "bay is narrower"),
             (dict(bay_reach=0.9), "does not reach"),
@@ -2194,6 +2212,15 @@ class TestPrepare(_Folder):
         self.assertEqual(va.load_session()["jobs"], [self.job])
         self.assertEqual(va.read_machine_file()["probe"]["passes"], 3)              # remembered for next time
         self.assertEqual(va._sbp_value_lines(open(va.TEMPLATE_FILE).read())["passes"], "3")   # and in vd_probe.sbp
+
+    def test_a_slot_too_close_to_the_edge_is_refused_before_probing(self):
+        # the wall touches are made 0.08 in behind the round end: a centre 0.1 in inside the edge puts them
+        # at the mouth. The job fixture's stock box is 24 x 30 with the left edge at X 0.
+        p = self.prep(design=[(0.1, 15.0, 0.625), (22.5, 15.0, 0.75)], mode="slots")
+        self.assertFalse(p.ok)
+        self.assertTrue(any("slot 1" in e and "at least 0.25" in e for e in p.errors), p.errors)
+        p = self.prep(design=[(0.3, 15.0, 0.625), (22.5, 15.0, 0.75)], mode="slots")
+        self.assertTrue(p.ok, p.errors)
 
     def test_half_slots_end_to_end(self):
         # the window's Start probing in half-slot mode: each slot's open side comes from the stock box

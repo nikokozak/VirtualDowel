@@ -33,7 +33,7 @@ Constraints:
 
 - On the flip axis, at opposite ends (for an end-over-end flip: one in the left edge, one in the right edge). On the flip axis, the side-A and side-B coordinates are the same.
 - Different widths (for example 0.5 and 0.625 in), so a wrong flip fails, as with holes.
-- Each slot is cut with an end mill that moves inward from outside the stock, to a round end. The round end must be at least 0.75 in inside the real stock edge. The reference point is the centre of the round end.
+- Each slot is cut with an end mill that moves inward from outside the stock, to a round end. The round-end centre must be at least 0.25 in inside the real stock edge, plus the slot width difference. The reference point is the centre of the round end.
 - Depth from face A: as deep as the side-A tool allows, past mid-thickness (D_A).
 
 Optional, only for stock that does not match the stock box at the slots (section 5): side A also cuts one small **key notch** on an edge at right angles to the flip axis. It needs no bay and is never probed; it is only a jog target.
@@ -42,12 +42,13 @@ Optional, only for stock that does not match the stock box at the slots (section
 
 1. **Rough locate (cutter in).** The operator jogs the bit tip over the two slot openings (and the key notch, if cut), which show on the edge faces. Virtual Dowel makes a rough fit from them (section 5).
 2. **Bay cut (cutter in).** Nikolai's bay file from Fusion (section 7) is moved with the rough fit, the same way as a part file, and written as `<file>_VDROUGH.sbp`. The operator previews it, zeroes Z, and runs it.
-3. **Probe (probe in).** The operator parks the probe ball outside each slot opening, in line with the slot, at mid slot height below the bay floor. Then the routine (all moves guarded):
-   1. moves 0.6 in into the opening; nothing may be touched (else: stops, the slot is too short or the park is off-line);
-   2. checks that the slot walls are there and centres on them (else: stops, the ball is in the bay or not at the opening);
-   3. searches along the slot for the round end; it must be at least the back-off distance + 0.1 in further in (else: stops, the slot is too short);
-   4. backs off onto the straight part; one coarse and N fine passes of wall, wall, end;
+3. **Probe (probe in).** The operator parks the probe ball outside each slot opening, anywhere up to 1 in out, in line with the slot, at mid slot height below the bay floor. Then the routine (all moves guarded):
+   1. moves 1.2 in into the opening; a touch is the round end of a short slot (then it backs off by the half width + 0.08 in, onto the straight part) or the edge face of an off-line park (caught at step 2);
+   2. checks that the slot walls are there and centres on them: the nearer wall within a short search (bay safety), the other across the whole width (else: stops, the ball is in the bay, off-line, or parked more than 1 in out);
+   3. searches along the slot for the round end;
+   4. backs off by the half width + 0.08 in: the wall touches land 0.08 in behind the round end whatever the park distance was; one coarse and N fine passes of wall, wall, end;
    5. backs out the way it came in.
+   Until v2.3 the first move was 0.6 in and the end had to be 0.1 in beyond the back-off point, which made a 0.5 in slot fail unless the park was 0.35 to 0.55 in out. v2.4 (2026-10-12) finds the end first, so the park distance no longer matters.
 4. **Align and cut (cutter in)**, as in the hole mode.
 
 Compared with the hole mode, side B has one more tool change (cutter, probe, cutter) and one short cut.
@@ -86,7 +87,7 @@ So the 0.3 in bay oversize needs the real edge within about 0.15 in of the box a
 - **Bay length:** from outside the stock box to past the round end by rho_max + body radius + 0.4 in.
 - **Bay depth:** to 0.15 in below the top of the side-A slot.
 - **Slot width** at least ball diameter + 2 x (end-search length x tan 5 deg + 0.1 in): the end search runs along a machine axis, so on a board turned 5 deg it drifts sideways about 0.17 in over 2 in. About 0.6 in for a 1/8 in ball.
-- **Slot length:** the round end at least 0.75 in inside the real stock edge.
+- **Slot length:** the round-end centre at least 0.25 in inside the real stock edge, plus the slot width difference (the widest slot sets the back-off). The wall touches are 0.08 in behind the round end; the rest keeps the ball inside the edge.
 - **Probing height:** the ball below the bay floor by at least its radius; the probe body bottom above the bay floor.
 
 Built (`slot_bay_sizes`, CLI word `sizes`). The bay reach is measured from the round-end centre, the slot's reference point. Example: 1/8 in ball, 0.8 in body below the stock top, free stylus 1 in, 3 in stock, side-A slots 1.75 in deep, slots 0.625 and 0.75 in wide and 1.25 in long: bay at least 2.225 in wide, reaching 1.113 in past the round-end centre, 1.4 in deep; park the ball 0.65 to 1.49 in above the spoilboard. The simulator probes this minimum bay without a collision, with a 0.2 in rough-fit error and at both ends of the park band (a test).
@@ -130,7 +131,7 @@ Rules for the bay operation (in the README):
 |---|---|---|
 | Chips from the bay cut fall into the slot | Bad touches | Vacuum the slots before probing (the window says so). The repeat and width checks catch most bad touches. |
 | Probe body wider than the bay | Collision | Probe sizes are machine settings. The window shows the minimum bay width for the Fusion design. All moves at probing height are guarded. |
-| Round end less than 0.75 in inside the real edge (irregular stock) | No room for the wall touches | Rule in the README and the window. The routine stops with a message if the end comes too soon. |
+| Round-end centre less than 0.25 in inside the real edge (irregular stock) | The wall touches land at the mouth | Rule in the calculator; prepare refuses such a design. |
 | Wrong flip | Job turned 180 deg | Different slot widths, as with holes: the fit fails. |
 | Bay overlaps the part | Damaged part | Bays only in waste (Fusion design). The window draws the moved bay file over the side-B toolpaths. |
 | Part file chosen as the bay file | Part cut with the rough fit | Refused: the bay file's toolpaths must stay near the slots. Output named `_VDROUGH`. |
