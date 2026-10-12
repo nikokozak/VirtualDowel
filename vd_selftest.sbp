@@ -1,5 +1,5 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_selftest.sbp   v1.6  (2026-09-29)
+' VIRTUAL DOWEL  -  vd_selftest.sbp   v2.3  (2026-10-12)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 ' Offline check of every OpenSBP feature Virtual Dowel relies on.
 ' Contains NO motion commands - safe with or without the machine.
