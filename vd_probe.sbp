@@ -1,5 +1,5 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.1  (2026-10-04)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.3  (2026-10-12)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
 ' Finds the centers of two or more reference through-holes - or half slots
@@ -51,7 +51,7 @@
 &vd_slen = 2.5       'half slots - search this far in from where you park outside the opening
 &vd_rough = 0        '1 = rough locate - jog the bay cutter over each slot opening - no probing
 'data file written by this routine - and the Python and script it starts afterwards.
-'vd_install.bat sets all three. The data file must stay next to vd_align.py - the script reads it there.
+'INSTALL.bat sets all three. The data file must stay next to vd_align.py - the script reads it there.
 'SB3 cannot start a .bat file with SHELL - so it starts python.exe directly.
 &vd_out = "C:\SbParts\VirtualDowel\vd_probe_data.csv"
 &vd_pyexe = "C:\SbParts\VirtualDowel\venv\Scripts\python.exe"

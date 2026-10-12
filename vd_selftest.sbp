@@ -13,7 +13,7 @@
 '   line 19 fails -> the folder this file was loaded from cannot be written
 '                    (e.g. it was opened from inside the zip - extract it first)
 '   line 22 fails -> the folder in that line is wrong - double-click
-'                    vd_install.bat in the VirtualDowel folder once
+'                    INSTALL.bat in the VirtualDowel folder once
 '   line 27 fails -> SB3 needs a literal path in OPEN - the routine must change
 '=====================================================================
 OPEN "vd_selftest_result.txt" FOR OUTPUT AS #1

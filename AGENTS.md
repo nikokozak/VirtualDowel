@@ -32,13 +32,13 @@ python3 -m unittest tests.test_vd.TestFitMath.test_fit_recovers_rigid_transform
 python3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 --thick 3 --slot-depth 1.75 --widths 0.625,0.75
 # command line alignment
 python3 vd_align.py vd_probe_data.csv --job tests/fixtures/sideB_vcarve.sbp --holes "12,1,0.5;12,29,0.625" --nogui
-# zip for the shop PC: only the files the shop needs (no tests, plans or agent files)
-git archive --format=zip --prefix=VirtualDowel/ -o VirtualDowel-2.2.1.zip HEAD vd_align.py vd_app.py vd_probe.sbp vd_selftest.sbp vd_align.bat vd_install.bat README.md LICENSE.txt docs/guide.html docs/example
+# zip for the shop PC: INSTALL.bat, README, LICENSE and docs at the top, the program in app/ (no tests, plans, agent files)
+python3 make_zip.py          # -> VirtualDowel-<VERSION>.zip
 # release: tag, then attach the zip (the repo is private; the release is too)
-git tag -a v2.2.1 -m "Virtual Dowel 2.2.1" && git push origin v2.2.1 && gh release create v2.2.1 VirtualDowel-2.2.1.zip --title "Virtual Dowel 2.2.1" --notes-file notes.md
+git tag -a v2.3 -m "Virtual Dowel 2.3" && git push origin v2.3 && gh release create v2.3 VirtualDowel-2.3.zip --title "Virtual Dowel 2.3" --notes-file notes.md
 ```
 
-Expected test result: `OK` (167 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (169 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -46,7 +46,7 @@ Expected test result: `OK` (167 tests). Dependencies: Python 3.8+ standard libra
 |---|---|---|
 | Runs | Python code, tests, the OpenSBP simulator | SB3, the `.sbp` routines, Python started by SHELL |
 | Python | any 3.8+ | python.org 3.14 (install manager, `%LOCALAPPDATA%\Python\pythoncore-3.14-64`) |
-| Folder | this repo | `C:\SbParts\VirtualDowel` in the README; Nikolai has also used `C:\Users\itpstudent\Downloads\VirtualDowel` |
+| Folder | this repo (flat) | `C:\SbParts\VirtualDowel\app` is HERE from v2.3 (the zip puts the program in `app\`); Nikolai has also used `C:\Users\itpstudent\Downloads\VirtualDowel` |
 
 You cannot run SB3 here. These paths never run on the Mac: `pythonw.exe` selection, `GetLongPathNameW`, the custom-cut folder `C:\SbParts\Custom`, `venv\Scripts`. Results from the real machine come only from Nikolai, as files, logs and screenshots.
 
@@ -61,7 +61,8 @@ vd_probe.sbp     the probing routine. It is a TEMPLATE: render_run fills its &vd
 vd_selftest.sbp  offline check of SB3 features (Preview, no motion). The header refers to its
                  OPEN lines by number (19, 22, 27). Keep them on those lines.
 vd_align.bat     double-click launcher; logs to vd_launch.log. SB3 never uses it.
-vd_install.bat   runs vd_align.py --install
+INSTALL.bat      the only file the operator double-clicks: app\vd_align.bat --install (falls back to .\ in a checkout)
+make_zip.py      builds the shop zip: the repo is flat, the zip puts the program in app/ under a clean top level
 docs/guide.html  operator guide for thick stock (half slots): Fusion setup, sizes, probing; offline, no external files
 docs/thick-stock-plan.md  design plan and status of the thick-stock modes
 tests/test_vd.py   unittest suite

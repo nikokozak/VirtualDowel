@@ -43,7 +43,7 @@ echo Python 3.8 or newer not found >> "%LOG%"
 echo.
 echo Python 3.8 or newer was not found.
 echo Install it from https://www.python.org/downloads/windows/
-echo and tick "Add python.exe to PATH" in the installer. Then run vd_install.bat.
+echo and tick "Add python.exe to PATH" in the installer. Then run INSTALL.bat.
 echo.
 if /i not "%~1"=="--install" pause
 exit /b 2

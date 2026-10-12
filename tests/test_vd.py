@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
 import sys
 import tempfile
 import time
@@ -303,8 +304,48 @@ class TestDoubleClick(unittest.TestCase):
         self.assertIn("Virtual Dowel", r.stdout)
 
 
+class TestShopZip(unittest.TestCase):
+    """make_zip.py: INSTALL.bat, README, LICENSE and docs at the top, the program in app/, nothing else."""
+
+    def test_zip_layout_and_install_bat(self):
+        import make_zip
+        out = os.path.join(tempfile.mkdtemp(), "vd.zip")
+        make_zip.build(out)
+        with zipfile.ZipFile(out) as z:
+            names = z.namelist()
+            with open(os.path.join(ROOT, "vd_probe.sbp"), "rb") as fh:
+                self.assertEqual(z.read("VirtualDowel/app/vd_probe.sbp"), fh.read())     # byte for byte
+        for n in ("VirtualDowel/INSTALL.bat", "VirtualDowel/README.md", "VirtualDowel/LICENSE.txt",
+                  "VirtualDowel/docs/guide.html", "VirtualDowel/docs/example/sideB_example.sbp",
+                  "VirtualDowel/app/vd_align.py", "VirtualDowel/app/vd_app.py", "VirtualDowel/app/vd_probe.sbp",
+                  "VirtualDowel/app/vd_selftest.sbp", "VirtualDowel/app/vd_align.bat"):
+            self.assertIn(n, names)
+        self.assertEqual(len(names), 11)
+        self.assertFalse([n for n in names if "/tests/" in n or "AGENTS" in n or "thick-stock-plan" in n])
+        with open(os.path.join(ROOT, "INSTALL.bat"), "rb") as fh:
+            text = fh.read()
+        self.assertIn(b'call "%APP%\\vd_align.bat" --install', text)
+        self.assertIn(b"C80", text)
+        self.assertEqual(text.count(b"\r\n"), text.count(b"\n"))                 # CRLF, SB3 style
+
+    def test_guide_is_next_to_the_code_or_one_level_up(self):
+        self.assertEqual(va.guide_path(), os.path.join(ROOT, "docs", "guide.html"))
+        tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(tmp, "docs"))
+        os.makedirs(os.path.join(tmp, "app"))
+        open(os.path.join(tmp, "docs", "guide.html"), "w").close()
+        here = va.HERE
+        try:
+            va.HERE = os.path.join(tmp, "app")                    # the shop zip layout
+            self.assertEqual(va.guide_path(), os.path.join(tmp, "docs", "guide.html"))
+            va.HERE = os.path.join(tmp, "else", "where")           # no docs here or one level up
+            self.assertIsNone(va.guide_path())
+        finally:
+            va.HERE = here
+
+
 class TestInstall(unittest.TestCase):
-    """vd_install.bat -> vd_align.py --install: point the SB3 files at wherever the folder lives."""
+    """INSTALL.bat -> app\\vd_align.bat --install -> vd_align.py --install: point the SB3 files at wherever the folder lives."""
 
     def copy_to(self, folder):
         os.makedirs(folder, exist_ok=True)

@@ -1,5 +1,5 @@
 """
-Virtual Dowel - vd_app.py  v2.2.2  (2026-10-10)
+Virtual Dowel - vd_app.py  v2.3  (2026-10-12)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
@@ -450,9 +450,9 @@ class App:
             self.bay_var.set(got)
 
     def on_guide(self) -> None:
-        path = os.path.join(va.HERE, "docs", "guide.html")
-        if not os.path.isfile(path):
-            self.error("Virtual Dowel", f"The guide is missing: {path}")
+        path = va.guide_path()
+        if path is None:
+            self.error("Virtual Dowel", "The guide is missing: docs\\guide.html next to INSTALL.bat")
             return
         webbrowser.open("file:///" + path.replace(os.sep, "/").lstrip("/"))
 
