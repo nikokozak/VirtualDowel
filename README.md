@@ -21,7 +21,7 @@ VirtualDowel\
     vd_probe.sbp     probing routine - the window fills in its settings (template)
     vd_align.py      alignment script (Python 3, standard library only)
     vd_app.py        the Virtual Dowel window (double-click it to open the prepare window without ShopBot)
-    vd_align.bat     double-click to open the window on the last probe data
+    vd_align.bat     double-click to open the results window on the last probe data (C80 does this too)
     vd_selftest.sbp  offline check of SB3 behaviour (Preview mode, no motion)
 made by INSTALL.bat / the window, inside app\:
   venv\            the Python that SB3 starts (pythonw.exe: no console window)
@@ -109,12 +109,13 @@ You no longer edit `vd_probe.sbp`. The window keeps the probe settings in `vd_ma
    - **Side-B job files:** *Add files...* and select all of them at once, e.g. one per tool.
    - **Reference holes:** X, Y and diameter in side-B design coordinates. *+ Add hole* for a third. They are remembered per file and pre-filled next time.
    - **Stock box:** only if a file doesn't state its stock size (Fusion). The note under it says whether it's needed and shows the toolpaths' extent.
-   - **Probe:** input, deflected state, ball diameter, fine passes, spin-180, finger test. *Advanced...* has the depths and speeds. *Dry run* probes nothing and asks you to type the hole positions (use it in Preview).
+   - **Probe:** input, deflected state, ball diameter, fine passes, spin-180, finger test. *Advanced...* has the depths and speeds. A changed setting is kept, also when you close without starting. *Dry run* probes nothing and asks you to type the hole positions (use it in Preview).
    - *Check* runs every check that doesn't need the probe on every file: hole layout, stock box, side-A/side-B ambiguity, files the script can't rewrite. A file that would fail even with perfect probing is marked **FAIL** before you probe.
    - **Start probing** checks again, removes aligned files and probe data from earlier runs (the board has moved), writes `vd_run.sbp` with your settings, and closes. ShopBot runs it straight away. Its first message names the time it was prepared, so an old run file is easy to spot.
    - Files in mm work too: hole values are in the file's units, and every selected file must use the same units.
-   - *Close* without Start runs nothing.
-4. **Probing** (step 2) runs as before: finger test, then for each hole the keypad opens. Park the tip over the hole centre about 0.1 in above the surface and press ESC.
+   - *Close without starting* runs nothing.
+   - **Probe data on file.** When the last probing run belongs to the board that is on the machine now, a line at the top says so, with the button **Align with this data...**. It turns this window into the results window without probing: use it to align another file, to correct a hole value, or to see the reports again. Probing again replaces the data.
+4. **Probing** (step 2): finger test, then for each hole a message names it (hole 1 of 2, its diameter and its design X and Y) and the keypad opens. Park the tip over that hole's centre about 0.1 in above the surface and press ESC.
 5. When probing finishes the window reopens at step 3, **Align**, with your files and holes filled in, and aligns them all at once:
    - The table shows **PASS/FAIL**, rotation, spacing error and output file per file. Click a file to see its full report.
    - A file that fails writes nothing and doesn't stop the others. You can edit a hole value and click *Align* again.
@@ -123,7 +124,7 @@ You no longer edit `vd_probe.sbp`. The window keeps the probe settings in `vd_ma
 7. `FP` → **`<job>_VD.sbp`**. It first checks that nothing has changed since probing: X/Y zero, units, and no FP offset or scale. Then it cuts.
 8. **Next file:** change the tool, zero **Z only**, `FP` its `_VD.sbp`. All files aligned from one probing run stay valid until you probe again.
 
-To align again from the last probe data without probing (e.g. another file), double-click `app\vd_align.bat`.
+To align again from the last probe data without probing (e.g. another file), type `C80` and click **Align with this data...**. Double-clicking `app\vd_align.bat` opens the same results window from Explorer.
 
 ## 3a. Probe calibration
 
@@ -167,9 +168,9 @@ py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 
 
 1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. The round-end centre must be at least 0.25 in inside the edge, plus the slot width difference; the size calculator says the exact number. Enter the X and Y of each round-end centre in side-B coordinates. Zero X/Y at the Setup 1 WCS corner and run side A.
 2. Flip and clamp. Keep the slot openings free.
-3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate side B with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter in)**. Jog the bit tip over each slot opening (slot 1, then slot 2; the key notch last, if you cut one).
+3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate side B with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter fitted)**. Jog the bit tip over each slot opening; each message names the slot, its width and the edge it opens to (the key notch last, if you cut one).
 4. The window says which file to run: `<bay file>_VDROUGH.sbp`. Look at it in Preview, zero Z with the bay cutter, and run it. Do not zero X or Y.
-5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe in)**. At each slot, jog the probe ball outside the opening, anywhere up to 1 in out, in line with the slot, at the park height from the size calculator. The routine finds the round end first, so the exact distance does not matter.
+5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe fitted)**. At each slot, jog the probe ball outside the opening, anywhere up to 1 in out, in line with the slot, at the park height from the size calculator. The routine finds the round end first, so the exact distance does not matter.
 6. The window aligns the side-B files as usual. Fit each cutter, zero Z only, and run each `_VD.sbp`.
 
 **Through slots** (a bit as long as the board is thick, but not the Z travel to lift it over the board): cut the slots through from outside on side A, choose **Through slots**, and go straight to step 5.
@@ -357,12 +358,12 @@ Anything the script refuses, it tells you why. Send me those lines.
 | C80 does nothing, or "Invalid command" | The custom cut wasn't installed (see the installer output) or SB3 looks elsewhere for custom cuts. Use `FP` → `vd_start.sbp` instead; it does the same. |
 | The window opens, but probing doesn't start after *Start probing* | ShopBot didn't run `FP` from inside the custom cut. Run `FP` → `vd_run.sbp` by hand, and tell me. |
 | A console flashes and closes when you double-click a `.py` file | Before 2.2.2 `vd_app.py` did nothing when run directly; from 2.2.2 it opens the prepare window. The normal start is `C80` in ShopBot. If the console still closes at once, look at `app\vd_launch.log` and send it to me. If the log got no new line, Python itself did not start: reinstall it from python.org with "Add python.exe to PATH" ticked, then run `INSTALL.bat` again. |
-| No window after probing | Double-click `app\vd_align.bat`. It uses the new probe data. `app\vd_launch.log` records every start and why it stopped; send it to me. |
+| No window after probing | Type `C80` and click **Align with this data...** (or double-click `app\vd_align.bat`). Both use the new probe data. `app\vd_launch.log` records every start and why it stopped; send it to me. |
 | A command prompt opens and stays open during a ShopBot file | SHELL passed a changed command (see "Confirmed on your SB3"). Type `echo %cmdcmdline%`, send me what it prints, then type `exit`. |
 | "probe reads DEFLECTED or unplugged" | Check the cable, then run the probe calibration to find the input and its state. |
-| "No contact within the search distance" | `&vd_hole` is too small, or the probe isn't triggering. |
-| "triggered … at the very end of the search" | Park closer to the hole centre, or raise `&vd_margin` a little. |
-| "touched something while lowering" | Not over the hole, or the hole is shallower than `&vd_depth` plus the park height. |
+| "No contact within the search distance" | The hole diameter you entered is too small, or the probe isn't triggering. |
+| "triggered … at the very end of the search" | Park closer to the hole centre, or raise *Search past the expected wall by* (Advanced...) a little. |
+| "touched something while lowering" | Not over the hole, or the hole is shallower than the plunge depth (Advanced...) plus the park height. |
 | Aligned file stops with "file offset or X/Y proportion" | An offset or proportion is set in the FP fill-in sheet. Clear it: offset off, proportions 1. On your SB3, these read 0 and 1 when nothing is set. |
 | "side-A numbers fit the probe data just as well" | Move the holes onto the flip axis, or add a third hole that is not in line with the other two. The override `{"allow_offaxis_ambiguity": 1}` only warns. |
 | "bare CR" or "mixes CRLF and LF" | Re-save the job from VCarve, or in SbEdit or Notepad, with Windows line endings. |

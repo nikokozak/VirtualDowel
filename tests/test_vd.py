@@ -2213,6 +2213,35 @@ class TestPrepare(_Folder):
         self.assertEqual(va.read_machine_file()["probe"]["passes"], 3)              # remembered for next time
         self.assertEqual(va._sbp_value_lines(open(va.TEMPLATE_FILE).read())["passes"], "3")   # and in vd_probe.sbp
 
+    def test_jog_prompts_name_each_reference(self):
+        say = va.say_prompts
+        self.assertTrue(say([(0.0, 0.0, 0.75)], cal=True)[0].startswith("The calibration hole - measured diameter 0.75 in. Jog"))
+        self.assertTrue(say(DESIGN, centre=True)[1].startswith("Bore 2 of 2 - diameter 0.625"))
+        mm = say([(300.0, -25.0, 12.0), (10.0, -25.0, 16.0)], mm=True)
+        self.assertIn("diameter 12 at X 300 Y -25 mm", mm[0])
+        through = say([sv[:3] for sv in SLOTS_B], "through", box=STOCK24)
+        self.assertIn("at mid slot height", through[0])                      # no bay in a through slot
+        self.assertNotIn("bay", through[0])
+        notch = say([sv[:3] for sv in SLOTS_B], "through", centre=True, box=STOCK24)
+        self.assertTrue(notch[0].startswith("Notch 1 of 2 - width 0.625"))
+        rough = say(SLOTS, "slots", box=STOCK24, key=(0.0, 15.0), rough=True)
+        self.assertEqual(len(rough), 3)
+        self.assertTrue(rough[0].startswith("Slot 1 of 3 - width 0.5 - round end X 12 Y 1.5 in - opens to Y min. "
+                                            "Jog the bit tip"), rough[0])
+        self.assertTrue(rough[2].startswith("The key notch - 3 of 3 - at X 0 Y 15 in. Jog the bit tip"), rough[2])
+        long_mm = say([(300.5, -25.25, 15.875), (1200.75, -25.25, 19.05)], "slots", mm=True, box=(0, -50, 1250, 0))
+        for line in say(DESIGN) + through + rough + mm + long_mm:
+            self.assertFalse(set(",'()") & set(line), line)                   # MSGBOX bodies: SB3's forbidden characters
+            self.assertLessEqual(len(line) + len("MSGBOX(,64,Virtual Dowel)"), va.MAX_SBP_LINE, line)
+        tpl = open(os.path.join(ROOT, "vd_probe.sbp"), newline="").read()
+        self.assertLessEqual(max(len(ln) for ln in tpl.split("\r\n")), va.MAX_SBP_LINE)   # the template too
+        with self.assertRaises(va.VDError):
+            va.render_say(tpl, ["x" * va.MAX_SBP_LINE])
+        old = re.sub(r"(?m)^vd_say\d:\r?\n.*\r?\n", "", open(os.path.join(ROOT, "vd_probe.sbp"), newline="").read())
+        with self.assertRaises(va.VDError) as cm:
+            va.render_say(old, say(DESIGN))
+        self.assertIn("vd_say1", str(cm.exception))
+
     def test_a_slot_too_close_to_the_edge_is_refused_before_probing(self):
         # the wall touches are made 0.08 in behind the round end: a centre 0.1 in inside the edge puts them
         # at the mouth. The job fixture's stock box is 24 x 30 with the left edge at X 0.
@@ -2230,8 +2259,12 @@ class TestPrepare(_Folder):
         vals = va._sbp_value_lines(self.run_file())
         self.assertEqual([vals[f"open{i}"] for i in range(1, 7)], ["1", "2", "0", "0", "0", "0"])
         self.assertEqual(va.load_session()["mode"], "slots")
+        self.assertIn("MSGBOX(Slot 1 of 2 - width 0.625 - round end X 1.5 Y 15 in - opens to X min. Jog the ball "
+                      "OUTSIDE the opening in line with the slot - under 1 in out - below the bay floor.", self.run_file())
+        self.assertIn("MSGBOX(Slot 2 of 2 - width 0.75 - round end X 22.5 Y 15 in - opens to X max.", self.run_file())
         vm, m, _, _ = slot_run(0.9, (1.0, -0.5), text=self.run_file())
         self.assertEqual(m.collisions, [])
+        self.assertTrue(any(s.startswith("Slot 2 of 2") for s in vm.ui.messages))
         with open(va.DEFAULT_DATA, "w") as fh:
             fh.write(data_text(vm))
         r = va.align_batch(va.DEFAULT_DATA, [self.job], design)[0][1]
@@ -2421,6 +2454,8 @@ class TestPrepareRough(_Folder):
         vals = va._sbp_value_lines(text)
         self.assertEqual((vals["rough"], vals["nholes"], vals["after"]), ("1", "2", '"rough"'))
         self.assertTrue(vals["out"].strip('"').endswith("vd_rough_data.csv"))
+        self.assertIn("MSGBOX(Slot 1 of 2 - width 0.5 - round end X 12 Y 1.5 in - opens to Y min. "
+                      "Jog the bit tip over the centre of its opening", text)
         self.assertEqual(va.load_session()["kind"], "rough")
         deg, tx, ty = 1.5, 2.0, -1.0
         pts = [T(deg, tx, ty, o) for o in ((12.0, 0.0), (12.0, 30.0))]
@@ -2483,6 +2518,7 @@ class TestCalibration(_Folder):
     def test_no_probe_found(self):
         mach = Machine(holes=[(10.0, 5.0, 0.75)], probe_pin=3, idle=1)
         p = va.prepare_calibration(self.machine, 0.75, template=os.path.join(ROOT, "vd_probe.sbp"))
+        self.assertIn("MSGBOX(The calibration hole - measured diameter 0.75 in.", self.run_file())
         ui = UI(parks=[(10.0, 5.0, 0.1)])
         ui.msgbox_orig = ui.msgbox
         def msgbox(vm, body, btype, title):                                      # operator never touches the tip
@@ -2588,6 +2624,10 @@ class TestWindow(_Folder):
         truth = [T(0.6, 1.2, 0.4, d[:2]) + (d[2],) for d in DESIGN]
         vm = TrackingVM(self.run_file(), Machine(holes=truth),
                         UI(parks=[(x + 0.03, y - 0.04, 0.1) for x, y, _ in truth]), numfmt=vb_single).run()
+        # the jog prompt names the hole and its design position - not "the next hole"
+        said = [m for m in vm.ui.messages if m.startswith("Hole ")]
+        self.assertTrue(said[0].startswith("Hole 1 of 2 - diameter 0.5 at X 12 Y 1 in. Jog the probe tip"), said)
+        self.assertTrue(said[1].startswith("Hole 2 of 2 - diameter 0.625 at X 12 Y 29 in."), said)
         with open(va.DEFAULT_DATA, "w") as fh:
             fh.write(data_text(vm))
         b = self.app("align")
@@ -2616,6 +2656,38 @@ class TestWindow(_Folder):
         c.on_save_cal()
         self.assertEqual(va.load_machine()["pin"], 2)
         c.root.destroy()
+
+    def test_align_again_from_the_prepare_window(self):
+        # C80 again after probing: the prepare window offers the probe data on file and becomes the results window
+        truth = [T(0.3, 1.0, 0.5, d[:2]) + (d[2],) for d in DESIGN]
+        vm, _, _ = run_probe(truth, [(x + 0.03, y - 0.04, 0.1) for x, y, _ in truth])
+        va.save_session({"kind": "probe", "jobs": [self.job], "holes": [list(d) for d in DESIGN],
+                         "prepared": time.time() - 30})                    # Start was clicked before probing
+        with open(va.DEFAULT_DATA, "w") as fh:
+            fh.write(data_text(vm))
+        a = self.app("prepare")
+        self.assertTrue(a.data_row.winfo_manager())
+        a.switch_to_align()
+        self.assertEqual((a.mode, a.root.title()), ("align", "Virtual Dowel - results"))
+        self.assertEqual(a.tree.item(self.job)["values"][1], "PASS")
+        self.assertTrue(os.path.exists(va.default_out_path(self.job, False)))
+        self.assertIn("nothing to run", self.run_file())                     # ShopBot runs nothing after the window
+        self.assertNotIn("MSGBOX", self.run_file())
+        a.on_close()
+        self.assertNotIn("MSGBOX", self.run_file())
+        # data older than the last Start belongs to an earlier board position: not offered
+        os.utime(va.DEFAULT_DATA, (time.time() - 60, time.time() - 60))
+        va.save_session({"kind": "probe", "jobs": [self.job], "holes": [list(d) for d in DESIGN],
+                         "prepared": time.time()})
+        b = self.app("prepare")
+        self.assertFalse(hasattr(b, "data_row"))
+        b.root.destroy()
+
+    def test_a_changed_probe_setting_is_kept_on_close(self):
+        a = self.app("prepare")
+        a.mvars["tip"].set("0.13")
+        a.on_close()
+        self.assertEqual(va.load_machine()["tip"], 0.13)
 
     def test_stale_probe_data_is_not_aligned(self):
         truth = [T(0.3, 1.0, 0.5, d[:2]) + (d[2],) for d in DESIGN]
@@ -2685,13 +2757,13 @@ class TestWindow(_Folder):
         self.assertEqual((a.size_header.cget("text"), a.add_hole_btn.cget("text")), ("Width", "+ Add slot"))
         # buttons read in work order, left to right: Check, rough locate, probing, close
         order = [w.cget("text") for w in reversed(a.check_btn.master.pack_slaves()) if isinstance(w, ttk_Button())]
-        self.assertEqual(order, ["Check", "Start rough locate (bay cutter in)", "Start probing (probe in)",
-                                 "Close - run nothing"])
+        self.assertEqual(order, ["Check", "Start rough locate (bay cutter fitted)", "Start probing (probe fitted)",
+                                 "Close without starting"])
         a._set_holes([(1.5, 15.0, None), (22.5, 15.0, 0.75)])
         self.assertIn("slot 1: enter its width", a.read_holes()[1])
         a.loc_var.set("through")
         a._on_locate_mode()
-        self.assertNotIn("Start rough locate (bay cutter in)",
+        self.assertNotIn("Start rough locate (bay cutter fitted)",
                          [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())])
         self.assertIn("Through slots - what to do now", report())
         a.root.destroy()
@@ -2711,11 +2783,14 @@ class TestWindow(_Folder):
         a._on_locate_mode()
         self.assertEqual((a.probe_mode(), a.size_header.cget("text")), ("through", "Width"))
         self.assertTrue(a.holes_frame.cget("text").startswith("References"))
+        self.assertEqual(a.jobs_frame.cget("text"), "Job files for the part - one per tool")   # no side B here
+        self.assertEqual(a.stock_frame.cget("text"), "Part outline - job coordinates")
         buttons = [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())]
-        self.assertNotIn("Start rough locate (bay cutter in)", buttons)
+        self.assertNotIn("Start rough locate (bay cutter fitted)", buttons)
         a.loc_var.set("holes")
         a._on_locate_mode()
         self.assertFalse(a.ref_frame.winfo_manager())
+        self.assertTrue(a.jobs_frame.cget("text").startswith("Side-B job files"))
         a.root.destroy()
         # the results screen remembers the method from the session
         va.save_session({"kind": "probe", "mode": "through", "fit": "centre", "jobs": [self.job],

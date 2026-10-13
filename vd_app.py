@@ -1,11 +1,12 @@
 """
-Virtual Dowel - vd_app.py  v2.4  (2026-10-12)
+Virtual Dowel - vd_app.py  v2.5  (2026-10-13)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
 
   prepare    before probing (the custom cut C80 opens it): side-B files, reference holes, stock box,
-             probe settings, checks. Start writes vd_run.sbp, which ShopBot runs next.
+             probe settings, checks. Start writes vd_run.sbp, which ShopBot runs next. When usable probe
+             data is on file, "Align with this data" turns the window into the results window instead.
   align      after probing (vd_run.sbp opens it): aligns every file at once and lists PASS / FAIL.
   calresult  after a probe calibration run: the probe's numbers, saved into the settings.
   rough      after a rough locate (half slots): places the bay cut file and says what to run next.
@@ -73,7 +74,8 @@ NEXT = {
   3. Stock box: only if a file does not state its stock size (the note says).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE, plug in its cable, and click Start probing.
-     ShopBot asks you to jog the probe over each hole; then this window comes back with the results.""",
+     ShopBot asks you to jog the probe to each hole in turn - the message names the hole and its design
+     position. Then this window comes back with the results.""",
     "slots": """Half slots - what to do now
   Before this: side A has cut two half slots in the board's edges, on the flip axis, of different widths.
   1. Add files: the side-B job files, and choose the bay cut file (made in Fusion).
@@ -200,6 +202,9 @@ class App:
             pass
 
     # ------------------------------------------------------------------ layout
+    JOBS_TITLE = "Side-B job files - the files for the flipped side, one per tool"
+    STOCK_TITLE = "Stock box - side-B coordinates"
+
     def _build_main(self) -> None:
         r = self.root
         outer = ttk.Frame(r, padding=10)
@@ -226,7 +231,7 @@ class App:
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
 
         # side-B files
-        jf = ttk.LabelFrame(outer, text="Side-B job files - the files for the flipped side, one per tool", padding=6)
+        jf = self.jobs_frame = ttk.LabelFrame(outer, text=self.JOBS_TITLE, padding=6)
         jf.pack(fill="both", expand=False)
         cols = ("file", "result", "rotation", "spacing", "output")
         self.tree = ttk.Treeview(jf, columns=cols, show="headings", height=5, selectmode="browse")
@@ -262,7 +267,7 @@ class App:
         self.add_hole_btn.pack(anchor="w", pady=(4, 0))
 
         # stock box
-        sf = ttk.LabelFrame(mid, text="Stock box - side-B coordinates", padding=6)
+        sf = self.stock_frame = ttk.LabelFrame(mid, text=self.STOCK_TITLE, padding=6)
         sf.pack(side="left", fill="both", padx=(8, 0))
         self.stock_vars = [tk.StringVar() for _ in range(4)]
         g = ttk.Frame(sf)
@@ -312,9 +317,9 @@ class App:
         self.status = tk.Label(bf, text="", anchor="w", font=("Segoe UI", 10, "bold"))
         self.status.pack(side="left", fill="x", expand=True)
         if self.mode == "prepare":
-            ttk.Button(bf, text="Close - run nothing", command=self.on_close).pack(side="right")
-            self.start_btn = ttk.Button(bf, text="Start probing (probe in)", command=self.on_start)
-            self.rough_btn = ttk.Button(bf, text="Start rough locate (bay cutter in)", command=self.on_start_rough)
+            ttk.Button(bf, text="Close without starting", command=self.on_close).pack(side="right")
+            self.start_btn = ttk.Button(bf, text="Start probing (probe fitted)", command=self.on_start)
+            self.rough_btn = ttk.Button(bf, text="Start rough locate (bay cutter fitted)", command=self.on_start_rough)
             self.check_btn = ttk.Button(bf, text="Check", command=self.on_check)
         else:
             ttk.Button(bf, text="Close", command=self.on_close).pack(side="right")
@@ -402,6 +407,9 @@ class App:
         else:
             title = "Reference holes - X and Y of the centre and the diameter - side-B coordinates"
         self.holes_frame.configure(text=title)
+        centre = self.method == "centre"
+        self.jobs_frame.configure(text="Job files for the part - one per tool" if centre else self.JOBS_TITLE)
+        self.stock_frame.configure(text="Part outline - job coordinates" if centre else self.STOCK_TITLE)
         self.size_header.configure(text="Width" if slots else "Diameter")
         self.add_hole_btn.configure(text="+ Add slot" if slots else "+ Add hole")
         self._refresh_stock_note()
@@ -739,16 +747,21 @@ class App:
         jobs = [j for j in sess.get("jobs", []) if os.path.isfile(j)]
         holes = sess.get("holes") or []
         stock = sess.get("stock")
+        pd, when, self.stale = self._read_probe_data(sess)
         if self.mode == "align":
-            try:
-                with open(self.data_path, "r", encoding="latin-1", newline="") as fh:
-                    self.pd = va.parse_probe_data(fh.read(), self.data_path)
-                if self.pd.cal_ref is not None:
-                    raise va.VDError("this is calibration data, not job data - probe the job's holes")
-                self._show_probe_info(sess)
-            except (OSError, va.VDError) as e:
-                self.pd = None
-                self.probe_info.configure(text=f"No usable probe data: {e}")
+            self.pd = pd
+            if pd is None:
+                self.probe_info.configure(text=f"No usable probe data: {when}")
+            else:
+                self._show_probe_info(when)
+        elif pd is not None and not self.stale:
+            # the operator typed C80 again: another file, a corrected value, or the results once more
+            row = self.data_row = ttk.Frame(self.method_note.master)
+            row.pack(fill="x", pady=(0, 6), after=self.method_note)
+            ttk.Label(row, text=f"Probe data from {when} ({pd.nholes} {'slots' if pd.open else 'holes'}) is on "
+                      "file. To align another file, or to see the results again, use it without probing:").pack(
+                side="left")
+            ttk.Button(row, text="Align with this data...", command=self.switch_to_align).pack(side="left", padx=8)
         for j in jobs:
             self._add_job(j)
         if not holes and jobs:
@@ -774,10 +787,35 @@ class App:
         self.stage2 = sess.get("kind") == "rough" and os.path.exists(va.ROUGH_DATA)
         self._on_locate_mode()
 
-    def _show_probe_info(self, sess: dict) -> None:
+    def _read_probe_data(self, sess: dict):
+        """The job probe data on file: (data, when, stale). data is None when there is none or it is
+        calibration data; then `when` says why. stale: older than the last Start, so from an earlier board."""
+        try:
+            with open(self.data_path, "r", encoding="latin-1", newline="") as fh:
+                pd = va.parse_probe_data(fh.read(), self.data_path)
+            if pd.cal_ref is not None:
+                raise va.VDError("this is calibration data, not job data - probe the job's holes")
+        except (OSError, va.VDError) as e:
+            return None, str(e), False
+        mtime = os.path.getmtime(self.data_path)
+        prepared = sess.get("prepared")
+        return pd, datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"), bool(prepared and mtime + 5 < prepared)
+
+    def switch_to_align(self) -> None:
+        """Prepare -> results, in the same window: align from the probe data on file. ShopBot runs nothing
+        after the window closes (a silent stub replaces the one with the message)."""
+        va.write_run_stub()
+        for w in self.root.winfo_children():
+            w.destroy()
+        self.mode = "align"
+        self.jobs, self.results, self.hole_rows, self.pd, self.stage2 = [], {}, [], None, False
+        self.root.title("Virtual Dowel - results")
+        self._build_main()
+        self.on_align_auto()
+
+    def _show_probe_info(self, when: str) -> None:
         pd = self.pd
         holes, _, _ = va.compute_holes(pd)
-        when = datetime.datetime.fromtimestamp(os.path.getmtime(self.data_path)).strftime("%Y-%m-%d %H:%M")
         what = "slots" if pd.open else "holes"
         lines = [f"Probed {when}   {pd.nholes} {what}   {pd.passes} fine passes"
                  + ("   spindle 0/180" if pd.spin180 else "") + ("   SIMULATED" if pd.sim else "")]
@@ -788,9 +826,7 @@ class App:
             else:
                 lines.append(f"  hole {h.index}: centre X {h.center[0]:.4f}  Y {h.center[1]:.4f}   "
                              f"diameter {h.dia:.4f}   repeat {h.repeat:.4f}")
-        prepared = sess.get("prepared")
-        if prepared and os.path.getmtime(self.data_path) + 5 < prepared:
-            self.stale = True
+        if self.stale:
             lines.append("NOT USABLE: this probe data is OLDER than the last Start probing - that run did not "
                          "finish, so this data belongs to an earlier board position. Probe again (C80).")
         self.probe_info.configure(text="\n".join(lines))
@@ -828,7 +864,7 @@ class App:
     def _refresh_stock_note(self) -> None:
         need, ext = va.needs_stock(self.jobs)
         if not self.jobs:
-            txt = "Add the side-B files first."
+            txt = "Add the job files first."
         elif need and self.probe_mode() != "holes":
             txt = "Needed: the file has no stock size, and slots need the box to know which edge each opens to."
         elif need:
@@ -1150,6 +1186,9 @@ class App:
     def on_close(self) -> None:
         if self.mode == "prepare" and self.result_code != 0:
             va.write_run_stub()          # nothing runs when the window is closed without Start
+            m, errs = self.read_machine()
+            if not errs:
+                va.save_machine(m)       # a changed probe setting is kept, as after Start
         self.root.destroy()
 
 
@@ -1157,7 +1196,7 @@ def run(mode: str, data_path: Optional[str] = None) -> int:
     if mode == "prepare":
         # if the window cannot open or crashes, ShopBot must not run an old probing file
         va.write_run_stub("The Virtual Dowel window closed without starting probing. If it did not open "
-                          "at all see vd_launch.log in the VirtualDowel folder.")
+                          "at all see vd_launch.log in the app folder.")
     try:
         app = App(mode, data_path)
     except Exception:

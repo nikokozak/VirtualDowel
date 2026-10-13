@@ -38,7 +38,7 @@ python3 make_zip.py          # -> VirtualDowel-<VERSION>.zip
 git tag -a v2.3 -m "Virtual Dowel 2.3" && git push origin v2.3 && gh release create v2.3 VirtualDowel-2.3.zip --title "Virtual Dowel 2.3" --notes-file notes.md
 ```
 
-Expected test result: `OK` (171 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (174 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -74,8 +74,8 @@ tests/fixtures/    sideB_vcarve.sbp, sideB_fusion.sbp (LF line endings)
 Data flow:
 
 1. **Start.** Operator types `C80`. The custom cut `C:\SbParts\Custom\Custom80.sbc` (or the next free number to 89) SHELLs `pythonw vd_align.py prepare` with SYNC. The window opens.
-2. **Prepare** (`prepare_probing`). The operator enters side-B files, holes (X, Y, diameter in side-B design coordinates), a stock box for Fusion files, and probe settings. *Check* runs `precheck_jobs`: a dry alignment against synthetic perfect probe data. *Start probing* deletes old outputs and probe data, writes sidecars, session and machine settings, renders `vd_run.sbp`, and exits. The custom cut then runs `FP,<folder>\vd_run.sbp`. If the operator closes the window, `vd_run.sbp` is a stub that does nothing.
-3. **Probe** (`vd_run.sbp`). Finger test. For each hole: keypad (SK) to park about 0.1 in above the centre; guarded plunge; one coarse pass; N fine passes (+X, -X, +Y, -Y; fast touch, back off, slow touch); optional spin-180. It writes `vd_probe_data.csv`, then SHELLs `vd_align.py align`.
+2. **Prepare** (`prepare_probing`). The operator enters side-B files, holes (X, Y, diameter in side-B design coordinates), a stock box for Fusion files, and probe settings. *Check* runs `precheck_jobs`: a dry alignment against synthetic perfect probe data. *Start probing* deletes old outputs and probe data, writes sidecars, session and machine settings, renders `vd_run.sbp`, and exits. The custom cut then runs `FP,<folder>\vd_run.sbp`. If the operator closes the window, `vd_run.sbp` is a stub that does nothing (and a changed probe setting is still saved). When the probe data on file is newer than the last Start (not stale), the prepare window offers *Align with this data...* (`switch_to_align`): it writes a silent stub and rebuilds the same window in align mode, so C80 is also the way back to the results.
+3. **Probe** (`vd_run.sbp`). Finger test. For each hole: a prompt that names it (`vd_say`: six MSGBOX lines, one per reference, that `render_say` fills from `say_prompts` with the design position; the template's own lines are generic), then keypad (SK) to park about 0.1 in above the centre; guarded plunge; one coarse pass; N fine passes (+X, -X, +Y, -Y; fast touch, back off, slow touch); optional spin-180. It writes `vd_probe_data.csv`, then SHELLs `vd_align.py align`.
 4. **Align** (`align_batch` -> `run_alignment` per file). PASS writes `<job>_VD.sbp` and `<job>_VD_report.txt`. FAIL writes no `_VD` file and deletes an older one.
 5. **Cut.** Operator fits the cutter, zeroes Z only, and runs each `_VD.sbp`. Each file checks at run time that X/Y zero, units, and FP offset/scale did not change since probing.
 6. **Calibrate** (optional, `prepare_calibration` / `analyze_calibration`). Finds the probe input, probes one known hole 10 times at 0 and 180 degrees, reports repeatability, effective ball and stylus offset. *Save* writes `vd_machine.json` and syncs the template. It writes `vd_cal_data.csv` and never touches job data or outputs.
@@ -169,7 +169,7 @@ New in v2.0, not yet run on the machine: the C80 custom cut and `C:\SbParts\Cust
 
 Known mechanical limit: the old ShopBot MAX lost X/Y steps once on a fast finishing pass. No software check finds a slip during a cut.
 
-In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`. v2.2 (2026-10-06) adds the centre-and-line mode (two references; 3D prints, castings); also not yet run on the machine.
+In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`. v2.2 (2026-10-06) adds the centre-and-line mode (two references; 3D prints, castings); also not yet run on the machine. v2.5 (2026-10-13): ergonomics - jog prompts name each reference with its design position, *Align with this data* from the prepare window, window words in the routine's messages instead of variable names.
 
 ## 11. Working with Nikolai
 

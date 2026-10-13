@@ -1,5 +1,5 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.4  (2026-10-12)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.5  (2026-10-13)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
 ' Finds the centers of two or more reference through-holes - or half slots
@@ -275,12 +275,12 @@ vd_all_done:
 WRITE #1; "END,"; &vd_nholes
 CLOSE #1
 MS, &vd_ms0, &vd_mz0
-MSGBOX(Probing finished. Click OK to open the Virtual Dowel window with the results.,OKCancel,Virtual Dowel)
+MSGBOX(Probing finished. Click OK to open the Virtual Dowel window with the results - or Cancel and type C80 later and click Align with this data.,OKCancel,Virtual Dowel)
 IF &msganswer = "Cancel" THEN GOTO vd_end
 &vd_cmd = &vd_pyexe & " " & &vd_script & " " & &vd_after
 SHELL, &vd_cmd, 1, SYNC
 IF &vd_cal = 1 THEN GOTO vd_end
-MSGBOX(For each file that PASSED - fit its cutter - zero Z only - then run its _VD.sbp version. Do NOT re-zero X or Y. If no Virtual Dowel window appeared double-click vd_align.bat in the VirtualDowel folder.,64,Virtual Dowel)
+MSGBOX(For each file that PASSED - fit its cutter - zero Z only - then run its _VD.sbp version. Do NOT re-zero X or Y. If no Virtual Dowel window appeared type C80 and click Align with this data.,64,Virtual Dowel)
 vd_end:
 END
 '
@@ -321,11 +321,38 @@ GOTO vd_end
 ' SUBROUTINES   (deepest GOSUB nesting is 5 - including the input handler - for holes and half slots)
 '=====================================================================
 '
+'---- say which reference comes next - the window rewrites the six MSGBOX lines with each reference's design position ----
+vd_say:
+IF &vd_h = 1 THEN GOTO vd_say1
+IF &vd_h = 2 THEN GOTO vd_say2
+IF &vd_h = 3 THEN GOTO vd_say3
+IF &vd_h = 4 THEN GOTO vd_say4
+IF &vd_h = 5 THEN GOTO vd_say5
+GOTO vd_say6
+vd_say1:
+MSGBOX(Reference 1. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+vd_say2:
+MSGBOX(Reference 2. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+vd_say3:
+MSGBOX(Reference 3. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+vd_say4:
+MSGBOX(Reference 4. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+vd_say5:
+MSGBOX(Reference 5. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+vd_say6:
+MSGBOX(Reference 6. Hole - jog the probe tip over its CENTER about 0.1 inch above the surface. Slot - jog the ball OUTSIDE the opening in line with it under 1 inch out. Slow keypad speed. ESC when done.,64,Virtual Dowel)
+RETURN
+'
 '---- let the operator park the probe over the next hole ----
 vd_locate:
 IF &vd_sim = 1 THEN GOTO vd_locate_sim
 PRINT "Virtual Dowel - hole "; &vd_h; " of "; &vd_nholes
-MSGBOX(Jog the probe tip over the CENTER of the next reference hole and about 0.1 inch or 3 mm above the surface. Use slow keypad speed near the work. Press ESC to close the keypad when you are done.,64,Virtual Dowel)
+GOSUB vd_say
 SK
 MSGBOX(Is the probe tip over the hole center and a little above the surface? Yes to probe it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
 IF &msganswer = "No" THEN GOTO vd_locate
@@ -335,6 +362,7 @@ IF &msganswer = "Cancel" THEN GOTO vd_abort
 &vd_z0 = %(3)
 RETURN
 vd_locate_sim:
+GOSUB vd_say
 INPUT "SIMULATION - type X then Y then diameter of this hole with commas between them" &vd_sx, &vd_sy, &vd_sd
 &vd_x0 = &vd_sx
 &vd_y0 = &vd_sy
@@ -512,11 +540,11 @@ IF &vd_d < 0 THEN GOTO vd_touch_ret
 vd_touch_ret:
 RETURN
 '
-'---- rough locate: the operator puts the bit tip over the next slot opening ----
+'---- rough locate: the operator puts the bit tip over the slot opening ----
 vd_rough_jog:
 IF &vd_sim = 1 THEN GOTO vd_rough_jog_sim
 PRINT "Virtual Dowel - opening "; &vd_h; " of "; &vd_nholes
-MSGBOX(Jog the bit tip over the centre of the next slot opening on the edge of the board - in the order the window shows - the key notch last. Press ESC when done.,64,Virtual Dowel)
+GOSUB vd_say
 SK
 MSGBOX(Is the bit tip over the centre of the slot opening? Yes to record it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
 IF &msganswer = "No" THEN GOTO vd_rough_jog
@@ -527,6 +555,7 @@ IF &msganswer = "Cancel" THEN GOTO vd_quit
 &vd_cby = %(7)
 RETURN
 vd_rough_jog_sim:
+GOSUB vd_say
 INPUT "SIMULATION - type X then Y of this slot opening then 0 with commas between them" &vd_sx, &vd_sy, &vd_sd
 &vd_x0 = &vd_sx
 &vd_y0 = &vd_sy
@@ -558,11 +587,11 @@ IF &vd_oc = 4 THEN &vd_iy = &vd_neg
 &vd_sos = 0 - &vd_sin
 RETURN
 '
-'---- half slots: let the operator park the probe outside the next slot opening ----
+'---- half slots: let the operator park the probe outside the slot opening ----
 vd_locate_slot:
 IF &vd_sim = 1 THEN GOTO vd_locate_slot_sim
 PRINT "Virtual Dowel - slot "; &vd_h; " of "; &vd_nholes
-MSGBOX(Jog the probe ball OUTSIDE the slot opening - in line with the slot - less than 1 inch or 25 mm out from the edge - at mid slot height below the bay floor. Use slow keypad speed. Press ESC when done.,64,Virtual Dowel)
+GOSUB vd_say
 SK
 MSGBOX(Is the probe ball outside the slot opening - in line with the slot and below the bay floor? Yes to probe it - No to jog again - Cancel to quit.,YesNoCancel,Virtual Dowel)
 IF &msganswer = "No" THEN GOTO vd_locate_slot
@@ -572,6 +601,7 @@ IF &msganswer = "Cancel" THEN GOTO vd_abort
 &vd_z0 = %(3)
 RETURN
 vd_locate_slot_sim:
+GOSUB vd_say
 INPUT "SIMULATION - type X then Y then width of the round end of this slot with commas between them" &vd_sx, &vd_sy, &vd_sd
 'synthetic slot - true center deliberately offset from what was typed - parked 1.5 inch outside it
 &vd_shx = &vd_sx + 0.020 * &vd_u
@@ -748,7 +778,7 @@ RETURN
 ' ERRORS
 '=====================================================================
 vd_err_miss:
-MSGBOX(No contact within the search distance. Park closer to the hole center - or in line with the half slot below the bay floor. Check the vd_hole setting and that the probe triggers. Probing aborted.,16,Virtual Dowel)
+MSGBOX(No contact within the search distance. Park closer to the hole center - or in line with the slot below the bay floor. Check the hole diameter in the window and that the probe triggers. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_err_nowalls:
 MSGBOX(No slot walls found. Park the ball less than 1 inch or 25 mm out from the edge - in line with the slot - at mid slot height below the bay floor. Probing aborted.,16,Virtual Dowel)
@@ -782,7 +812,7 @@ vd_err_notidle:
 MSGBOX(The probe input reads DEFLECTED or the probe is unplugged. Check the cable and the probe input settings - or run the probe calibration to find them.,16,Virtual Dowel)
 GOTO vd_quit
 vd_err_test:
-MSGBOX(The probe did not trigger during the finger test. Check the cable and the probe input settings - or run the probe calibration to find them. Set vd_test to 0 to skip this test.,16,Virtual Dowel)
+MSGBOX(The probe did not trigger during the finger test. Check the cable and the probe input settings - or run the probe calibration to find them. Untick Finger test in the window to skip this test.,16,Virtual Dowel)
 GOTO vd_quit
 vd_err_detect:
 MSGBOX(No input changed while the probe tip was held over. Check that the probe cable is plugged in and try again.,16,Virtual Dowel)
@@ -795,7 +825,7 @@ vd_err_cfg:
 MSGBOX(Settings problem - need at least 2 holes and 1 pass - probe input 1 to 8 - and a hole larger than the probe tip.,16,Virtual Dowel)
 GOTO vd_quit0
 vd_err_preview:
-MSGBOX(ShopBot is in PREVIEW mode. Switch to MOVE mode to probe - or set vd_sim to 1 for a dry run.,48,Virtual Dowel)
+MSGBOX(ShopBot is in PREVIEW mode. Switch to MOVE mode to probe - or tick Dry run in the window.,48,Virtual Dowel)
 GOTO vd_quit0
 vd_quit0:
 MS, &vd_ms0, &vd_mz0

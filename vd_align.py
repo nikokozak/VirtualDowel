@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.4  (2026-10-12)
+Virtual Dowel - vd_align.py  v2.5  (2026-10-13)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.4"
+VERSION = "2.5"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2129,9 +2129,62 @@ def render_run(template_text: str, values: Dict[str, object], note: str = "") ->
     return nl.join(head + lines) + nl
 
 
+EDGE_NAMES = {(1, -1): "X min", (1, 1): "X max", (2, -1): "Y min", (2, 1): "Y max"}
+MAX_SBP_LINE = 226      # the longest routine line that has run on the machine; longer is unproven
+
+
+def say_prompts(design: Sequence[DesignHole], mode: str = "holes", mm: bool = False, centre: bool = False,
+                box: Optional[Box] = None, key: Optional[Sequence[float]] = None, rough: bool = False,
+                cal: bool = False) -> List[str]:
+    """The jog prompt for each reference, in the routine's order: which one it is, its design position
+    as typed in the window, and where to park. The routine shows it before the keypad (vd_say)."""
+    # Lines stay under MAX_SBP_LINE: the texts are short on purpose (one unit, no "or 25 mm").
+    u, up, out1 = ("mm", "3 mm", "25 mm") if mm else ("in", "0.1 in", "1 in")
+    if cal:
+        return [f"The calibration hole - measured diameter {_sbp_num(design[0][2])} {u}. Jog the probe tip over "
+                f"its CENTER about {up} above the surface. Slow keypad speed near the work. ESC when done."]
+    n = len(design) + (1 if key else 0)
+    out = []
+    for i, d in enumerate(design, 1):
+        at = f"X {_sbp_num(d[0])} Y {_sbp_num(d[1])} {u}"
+        if mode == "holes":
+            out.append(f"{'Bore' if centre else 'Hole'} {i} of {n} - diameter {_sbp_num(d[2])} at {at}. Jog the "
+                       f"probe tip over its CENTER about {up} above the surface. Slow keypad speed near the work. "
+                       "ESC when done.")
+            continue
+        edge = EDGE_NAMES[open_side(d[0], d[1], box)] if box else "the stock"
+        what = f"{'Notch' if centre else 'Slot'} {i} of {n} - width {_sbp_num(d[2])} - round end {at} - opens to {edge}."
+        if rough:
+            out.append(f"{what} Jog the bit tip over the centre of its opening on the board edge. ESC when done.")
+        else:
+            height = "below the bay floor" if mode == "slots" else "at mid slot height"
+            out.append(f"{what} Jog the ball OUTSIDE the opening in line with the slot - under {out1} out - {height}. "
+                       "ESC when done.")
+    if key:
+        out.append(f"The key notch - {n} of {n} - at X {_sbp_num(key[0])} Y {_sbp_num(key[1])} {u}. Jog the bit tip "
+                   "over the centre of its opening on the board edge. ESC when done.")
+    return out
+
+
+def render_say(text: str, prompts: Sequence[str]) -> str:
+    """Put each prompt into the MSGBOX line after the vd_say<N> label of the routine (N from 1)."""
+    lines = split_lines(text)
+    nl = "\r\n" if "\r\n" in text else "\n"
+    for i, p in enumerate(prompts, 1):
+        hits = [k for k, ln in enumerate(lines) if ln.strip().lower() == f"vd_say{i}:"]
+        if len(hits) != 1 or not lines[hits[0] + 1].startswith("MSGBOX("):
+            raise VDError(f"vd_probe.sbp has no vd_say{i} prompt line - it is from an older version; copy the new "
+                          "vd_probe.sbp and run INSTALL.bat")
+        lines[hits[0] + 1] = f"MSGBOX({msg_safe(p)},64,Virtual Dowel)"
+        if len(lines[hits[0] + 1]) > MAX_SBP_LINE:
+            raise VDError(f"the prompt for reference {i} is {len(lines[hits[0] + 1])} characters - over the "
+                          f"{MAX_SBP_LINE} that ShopBot is known to take; shorter numbers please")
+    return nl.join(lines) + nl
+
+
 def write_run_stub(message: str = "", path: str = None) -> None:
     """vd_run.sbp when nothing is prepared: the window closed without starting, or could not open."""
-    lines = ["'Virtual Dowel - nothing prepared. Type the Virtual Dowel custom cut (C80) to open the window."]
+    lines = ["'Virtual Dowel - nothing to run. Type the Virtual Dowel custom cut (C80) to open the window."]
     if message:
         lines.append(f"MSGBOX({msg_safe(message)},64,Virtual Dowel)")
     lines.append("END")
@@ -2298,6 +2351,8 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     stamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M")
     text = render_run(tpl, vals, note=f"probing {len(design)} holes for: " +
                       ", ".join(os.path.basename(j) for j in jobs))
+    text = render_say(text, say_prompts(design, mode, mm=units == {1}, centre=centre,
+                                        box=slot_box(jobs, stock) if mode != "holes" else None))
     # the first message names this preparation, so an old vd_run.sbp is recognisable
     text = text.replace("MSGBOX(VIRTUAL DOWEL probing. ",
                         f"MSGBOX(VIRTUAL DOWEL probing - prepared {stamp} for {len(design)} holes. ", 1)
@@ -2352,6 +2407,8 @@ def prepare_rough(jobs: Sequence[str], bay_file: str, design: List[DesignHole], 
     vals.update(nholes=len(design) + (1 if key else 0), sim=int(sim), cal=0, calref=0, detect=0, launched=1,
                 after="rough", rough=1, out=out, test=0, **{f"open{i}": 0 for i in range(1, 7)})
     text = render_run(tpl, vals, note=f"rough locate of {len(design)} half slots" + (" and the key notch" if key else ""))
+    text = render_say(text, say_prompts(design, "slots", mm={job_units(j) for j in jobs} == {1}, box=stock, key=key,
+                                        rough=True))
     data = text.encode("latin-1", errors="replace")
     if not sim:
         new_session()
@@ -2403,6 +2460,7 @@ def prepare_calibration(machine: Dict[str, float], ref_dia: float, passes: int =
     if detect:
         vals["test"] = 0                 # holding the tip over to find the input is the test
     text = render_run(tpl, vals, note=f"probe calibration on a {ref_dia:g} reference hole")
+    text = render_say(text, say_prompts([(0.0, 0.0, ref_dia)], cal=True))
     prev = load_session()
     keep = prev if prev.get("kind") == "probe" else prev.get("keep")
     save_session({"kind": "cal", "ref": ref_dia, "sim": bool(sim), "prepared": time.time(), "keep": keep})
