@@ -234,7 +234,7 @@ class Machine:
     def __init__(self, holes, tip=0.125, ecc=(0.0, 0.0), pretravel=0.004, latency=0.012,
                  jitter=0.0002, idle=1, overtravel=0.12, base_offset=(3.25, -1.5), units=0,
                  start=(0.0, 0.0, 1.0), seed=1, mode=0, work_decimals=3, probe_pin=1, other_inputs=None,
-                 solid=None):
+                 solid=None, hold=0.0):
         self.holes = holes              # list of (cx, cy, diameter) in working coords
         self.probe_pin = probe_pin      # input the probe is wired to
         self.other_inputs = dict(other_inputs or {})   # {pin: fixed state} for everything else
@@ -263,6 +263,11 @@ class Machine:
         self.cur_pre = pretravel
         self.moves = 0
         self.solid = solid              # SlotStock: thick stock instead of the holed surface
+        # a switch at its threshold: it trips in motion after `pretravel`, but once the machine has
+        # stopped it stays tripped only if the deflection is `hold` beyond that (user's probe, 2026-10-15:
+        # "fires briefly and returns to clear, a tiny more force gives a full switch")
+        self.hold = hold
+        self.moving = False
 
     # geometry ---------------------------------------------------------------------
     def penetration(self, x, y, z):
@@ -280,7 +285,7 @@ class Machine:
         return pen
 
     def deflected_at(self, x, y, z):
-        return self.penetration(x, y, z) > self.cur_pre
+        return self.penetration(x, y, z) > self.cur_pre + (0.0 if self.moving else self.hold)
 
     def input_state(self, pin):
         if pin != self.probe_pin:
@@ -318,6 +323,7 @@ class Machine:
             return None
         self.cur_pre = self.pretravel + self.rng.gauss(0.0, self.jitter)
         start_state = {p: self.input_state(p) for p in armed}
+        self.moving = True
         step = 2e-5
         n = max(1, int(L / step))
         fired = None
@@ -360,6 +366,7 @@ class Machine:
                     break
             elif s >= stop_s:
                 break
+        self.moving = False
         self.x = x0 + (tx - x0) * stop_s
         self.y = y0 + (ty - y0) * stop_s
         self.z = z0 + (tz - z0) * stop_s

@@ -219,11 +219,11 @@ Not yet run on the machine. The first test: a 3D print with two bores, a job tha
 **Probe routine**
 - The probe must read idle before every guarded move; a trigger only counts when the input changes.
 - It stops if a trigger arrives between arming and moving.
-- It rejects a "touch" that didn't stop short of its target or didn't leave the tip deflected.
+- It rejects a "touch" that didn't stop short of its target. A trip that clears again once the machine has stopped is a graze at the switch's threshold, not a contact: the search goes on from there toward the same target, up to five times per wall.
 - A guarded plunge stops if the tip lands on the surface. You are then asked to jog again.
 - The search distance shrinks to *this* hole's measured radius plus the margin after the first pair of touches.
 - On any error, it lifts out at the hole centre.
-- The data file is truncated at the start, so an aborted run never leaves old data to align against.
+- The data file is truncated at the start, so an aborted run never leaves old data to align against. An aborted run ends with an `ERR` line that names the cause (and the hole, direction and travel), which the window repeats.
 - Every new probing run first deletes the aligned files from earlier runs, so an old `_VD.sbp` can't be run on a new board.
 
 **Script**, which fails and writes nothing when:
@@ -337,7 +337,7 @@ Anything the script refuses, it tells you why. Send me those lines.
 1. Run the finger test. If it times out even though the input light changes, set `&vd_test = 0` and tell me.
 2. Cut two test holes (0.500 and 0.625 in) in scrap.
 3. Probe with `&vd_passes = 10`. The report's `repeat` and `Probe size bias` describe your probe.
-   - If you get "triggered without a solid contact" on good holes, tell me. It means the input doesn't stay deflected after a slow stop on your probe.
+   - If you get "tripped 5 times on one wall without staying tripped" on good holes, the switch opens at a graze and closes again. Clean the contacts, or add a little spring preload, and tell me.
 4. Repeat once with `&vd_spin180 = 1` to measure runout.
 
 **Stage 3: air cut.**
@@ -362,7 +362,9 @@ Anything the script refuses, it tells you why. Send me those lines.
 | A command prompt opens and stays open during a ShopBot file | SHELL passed a changed command (see "Confirmed on your SB3"). Type `echo %cmdcmdline%`, send me what it prints, then type `exit`. |
 | "probe reads DEFLECTED or unplugged" | Check the cable, then run the probe calibration to find the input and its state. |
 | "No contact within the search distance" | The hole diameter you entered is too small, or the probe isn't triggering. |
-| "triggered … at the very end of the search" | Park closer to the hole centre, or raise *Search past the expected wall by* (Advanced...) a little. |
+| "tripped only at the very end of the search" | Park closer to the hole centre, or raise *Search past the expected wall by* (Advanced...) a little. The search goes only that far past where the wall would be with a centred park, so the park must be within that distance of the centre. |
+| "input changed the moment the search was armed" | The contact chatters at rest or the line is noisy. Check the cable and both connectors. |
+| "tripped 5 times on one wall without staying tripped" | The switch opens at a graze and closes again when the machine stops. The routine pushes on from a graze, up to five times; a probe that never holds (a pulse output) cannot be used. Clean the contacts or add a little spring preload. |
 | "touched something while lowering" | Not over the hole, or the hole is shallower than the plunge depth (Advanced...) plus the park height. |
 | Aligned file stops with "file offset or X/Y proportion" | An offset or proportion is set in the FP fill-in sheet. Clear it: offset off, proportions 1. On your SB3, these read 0 and 1 when nothing is set. |
 | "side-A numbers fit the probe data just as well" | Move the holes onto the flip axis, or add a third hole that is not in line with the other two. The override `{"allow_offaxis_ambiguity": 1}` only warns. |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.5  (2026-10-13)
+Virtual Dowel - vd_align.py  v2.6  (2026-10-15)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.5"
+VERSION = "2.6"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -190,12 +190,38 @@ def _i(tok: str, line_no: int) -> int:
     return int(round(v))
 
 
+ERR_TEXT = {1: "no contact within the search distance", 2: "no slot walls found",
+            3: "the probe read deflected before a move",
+            4: "the input changed the moment the search was armed, before any motion",
+            5: "the probe tripped 5 times without staying tripped (it opens at a graze and closes again)",
+            6: "the probe tripped only at the very end of the search",
+            7: "the probe read deflected or unplugged at the start", 8: "no trigger during the finger test",
+            9: "no input changed during the input detection"}
+
+
+def err_text(f: Optional[List[str]]) -> str:
+    """The routine's ERR line (code, hole, axis, sign, travel, limit) in words."""
+    if not f:
+        return "probing was aborted"
+    try:
+        code = int(float(f[0]))
+        s = "probing was aborted: " + ERR_TEXT.get(code, f"error code {code}")
+        hole, ax, sg, trav, dist = (float(x) for x in f[1:6])
+        if hole > 0 and ax > 0:
+            s += (f" (hole {hole:g}, {'XY'[int(ax) - 1]}{'+' if sg > 0 else '-'}, travel {trav:.4f} "
+                  f"of {dist:.4f})")
+        return s
+    except (ValueError, IndexError):
+        return "probing was aborted (" + ",".join(f) + ")"
+
+
 def parse_probe_data(text: str, path: str = "") -> ProbeData:
     header = None
     cfg: List[float] = []
     date = ""
     touches: List[Touch] = []
     end_count = None
+    err = None
     cal_ref: Optional[float] = None
     detected: Optional[Tuple[int, int]] = None
     opened: Dict[int, Tuple[int, int]] = {}
@@ -251,13 +277,15 @@ def parse_probe_data(text: str, path: str = "") -> ProbeData:
             detected = (_i(f[0], n), _i(f[1], n))
         elif tag == "END":
             end_count = _i(f[0], n) if f else -1
+        elif tag == "ERR":
+            err = f
         else:
             raise ProbeDataError(f"probe data line {n}: unknown record {tag!r}")
     if header is None:
         raise ProbeDataError("probe data has no header - probing was cancelled or this is not a "
                              "vd_probe.sbp data file. Run vd_probe.sbp again.")
     if end_count is None:
-        raise ProbeDataError("probe data is INCOMPLETE (no END record) - probing was aborted. "
+        raise ProbeDataError(f"probe data is INCOMPLETE (no END record) - {err_text(err)}. "
                              "Run vd_probe.sbp again.")
     if header["units"] not in (0, 1):
         raise ProbeDataError("probe data: unknown units code")

@@ -38,7 +38,7 @@ python3 make_zip.py          # -> VirtualDowel-<VERSION>.zip
 git tag -a v2.3 -m "Virtual Dowel 2.3" && git push origin v2.3 && gh release create v2.3 VirtualDowel-2.3.zip --title "Virtual Dowel 2.3" --notes-file notes.md
 ```
 
-Expected test result: `OK` (174 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
+Expected test result: `OK` (176 tests). Dependencies: Python 3.8+ standard library only, tkinter for the window. Do not add packages. The shop PC must need only a python.org install.
 
 ## 3. Environments
 
@@ -107,6 +107,7 @@ Rules for any `.sbp` code that you write or generate:
 - CRLF line endings, byte for byte. `.gitattributes` is `* -text`. Never let a tool convert line endings.
 - Assign every variable before use.
 - After a plunge, every error path lifts the probe out before the routine ends or asks for a new jog.
+- A trip that does not hold once the machine has stopped is a graze, not a contact: `vd_touch` re-arms and moves on toward the same target, at most five times per wall (`vd_err_graze`). A trip at arming (`vd_err_arm`) and a trip in the last 0.002 in (`vd_err_end`) keep their own messages. Every abort writes the `ERR` line (`&vd_ecode`).
 - SIM mode never commands motion.
 - Installer-set variables are assigned exactly once.
 - Look for name collisions: `&vd_py` is the probe Y position, so the Python path is `&vd_pyexe`.
@@ -124,7 +125,7 @@ Rules for any `.sbp` code that you write or generate:
 
 ## 7. Testing
 
-- `tests/sbp_vm.py` models: `%(1..3)` rounded to 3 decimals; `%(6)/%(7)` constant at the zero position; probe pretravel, latency and jitter; the probe on any input pin; finger presses; stylus eccentricity that flips with `ui.on_spin`; PAUSE under 1 s raises; MSGBOX/INPUT/SK through a scripted `UI`; SHELL and FP are recorded, not run.
+- `tests/sbp_vm.py` models: `%(1..3)` rounded to 3 decimals; `%(6)/%(7)` constant at the zero position; probe pretravel, latency and jitter; `hold` (a switch that trips in motion but clears again at rest unless pushed `hold` further: a graze); the probe on any input pin; finger presses; stylus eccentricity that flips with `ui.on_spin`; PAUSE under 1 s raises; MSGBOX/INPUT/SK through a scripted `UI`; SHELL and FP are recorded, not run.
 - The VM is strict: an unknown statement raises. When you add an OpenSBP statement to a routine, add it to the VM only with the semantics that the handbook or the machine confirms.
 - **When SB3 surprises you, change the VM to match the machine first. Then fix the code.** Bugs went unseen when the VM had the same wrong assumption as the code (`%(6)`/`%(7)`, sub-second PAUSE).
 - Static checks cover: THEN actions, variables used before assignment, PAUSE values, quoted strings with operators, installer variables, self-test OPEN line numbers, copyright lines.
@@ -143,7 +144,9 @@ DET,<pin>,<deflected state>   input detection only
 T,hole,orient,pass,axis,sign,x,y,z,bx,by    one per touch; pass 0 = coarse; bx/by = %(6)/%(7)
 H,hole,orient,xc,yc,zp        routine's running estimate (not used)
 O,hole,axis,sign              half slot: the hole opens toward (axis, sign); no touch is made that way
-END,<nholes>                  no END = aborted run
+ERR,code,hole,axis,sign,travel,limit   aborted run: the cause (ERR_TEXT in vd_align.py; 1 miss, 2 no walls,
+                              3 deflected before a move, 4 fired at arming, 5 five grazes, 6 very end of the
+                              search, 7-9 before any touch, then zeros) - no END follows
 ```
 
 Rough locate data `vd_rough_data.csv` (half-slot mode, side B, before the bay cut; written by `vd_probe.sbp` with `&vd_rough = 1`): `VR,1,units,sim,n,mode`, `DT,...`, one `R,i,x,y,bx,by` per jogged opening (the slots in the listed order, then the key notch if cut), `END,n`.
@@ -169,7 +172,7 @@ New in v2.0, not yet run on the machine: the C80 custom cut and `C:\SbParts\Cust
 
 Known mechanical limit: the old ShopBot MAX lost X/Y steps once on a fast finishing pass. No software check finds a slip during a cut.
 
-In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`. v2.2 (2026-10-06) adds the centre-and-line mode (two references; 3D prints, castings); also not yet run on the machine. v2.5 (2026-10-13): ergonomics - jog prompts name each reference with its design position, *Align with this data* from the prepare window, window words in the routine's messages instead of variable names.
+In progress: locating modes for stock too thick to drill through with the available Z travel. First: half-depth edge slots with a side-B bay cut. Plan: `docs/thick-stock-plan.md`. v2.2 (2026-10-06) adds the centre-and-line mode (two references; 3D prints, castings); also not yet run on the machine. v2.5 (2026-10-13): ergonomics - jog prompts name each reference with its design position, *Align with this data* from the prepare window, window words in the routine's messages instead of variable names. v2.6 (2026-10-15): Nikolai's new probe (2 mm ball) trips at a graze and clears again; the routine now searches on from a graze instead of aborting, splits the old "without a solid contact" message in three, and writes an `ERR` line on every abort. Seen on the machine: the X pair of a calibration passed, the +Y touch aborted (`vd_cal_data.csv` of 2026-10-15).
 
 ## 11. Working with Nikolai
 

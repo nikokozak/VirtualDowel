@@ -1,5 +1,5 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.5  (2026-10-13)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.6  (2026-10-15)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
 ' Finds the centers of two or more reference through-holes - or half slots
@@ -28,12 +28,12 @@
 &vd_nholes = 2       'number of reference holes - 2 or more
 &vd_passes = 2       'fine passes per hole - use 10 for a repeatability test
 &vd_spin180 = 0      '1 = probe each hole again after you turn the spindle 180 deg by hand
-&vd_depth = 0.30     'lower the tip this far below where you park it over the hole
+&vd_depth = 0.3     'lower the tip this far below where you park it over the hole
 &vd_margin = 0.08    'search this far past the expected wall before giving up
 &vd_backoff = 0.03   'retreat distance before the slow re-touch
-&vd_fast = 0.40      'fast touch and positioning speed
+&vd_fast = 0.4      'fast touch and positioning speed
 &vd_slow = 0.08      'slow touch speed
-&vd_zspd = 0.30      'Z speed for lowering into and lifting out of the hole
+&vd_zspd = 0.3      'Z speed for lowering into and lifting out of the hole
 &vd_test = 1         '1 = finger test of the probe before any motion
 &vd_c7 = 1           '1 = run C7 - spindle off - at the start
 &vd_sim = 0          '1 = SIMULATION - no motion - no probe needed - for a dry run
@@ -98,6 +98,12 @@ IF &vd_units = 1 THEN &vd_u = 25.4
 &vd_lime = 0
 &vd_inhole = 0
 &vd_hit = 0
+&vd_trav = 0
+&vd_graze = 0
+&vd_ecode = 0
+&vd_ax = 0
+&vd_sg = 0
+&vd_dist = 0
 &vd_xc = 0
 &vd_yc = 0
 &vd_x0 = 0
@@ -391,7 +397,7 @@ PAUSE 1
 vd_plunge_arm:
 IF %(&vd_idx) = &vd_trig THEN GOTO vd_err_pretrig
 ON INP(&vd_pin, &vd_trig) GOSUB vd_onhit
-IF &vd_hit = 1 THEN GOTO vd_err_false
+IF &vd_hit = 1 THEN GOTO vd_err_arm
 MZ, &vd_z0 - &vd_depth
 ON INP(&vd_pin, &vd_trig)
 &vd_inhole = 1
@@ -500,10 +506,12 @@ PAUSE 1
 vd_touch_arm:
 IF %(&vd_idx) = &vd_trig THEN GOTO vd_err_pretrig
 ON INP(&vd_pin, &vd_trig) GOSUB vd_onhit
-IF &vd_hit = 1 THEN GOTO vd_err_false
+IF &vd_hit = 1 THEN GOTO vd_err_arm
+&vd_graze = 0
+vd_touch_go:
 M2, &vd_tx, &vd_ty
 ON INP(&vd_pin, &vd_trig)
-IF &vd_hit = 0 THEN GOTO vd_touch_ret
+IF &vd_hit = 0 THEN GOTO vd_touch_miss
 'let the machine come to a complete stop before reading where the contact was
 PAUSE 1
 &vd_cx = %(1)
@@ -513,13 +521,30 @@ PAUSE 1
 &vd_cby = %(7)
 &vd_px = &vd_cx
 &vd_py = &vd_cy
-'a real contact stops SHORT of the target and leaves the tip deflected.
 '%(6)/%(7) do not follow the tool - they hold the table position of the X/Y zero - so use %(1)/%(2).
-IF %(&vd_idx) = &vd_idle THEN GOTO vd_err_false
 &vd_trav = (%(1) - &vd_s0) * &vd_sg
 IF &vd_ax = 2 THEN &vd_trav = (%(2) - &vd_s0) * &vd_sg
+'a real contact leaves the tip deflected. A switch that trips and clears again only grazed its
+'threshold - not a contact - so the search goes on from here toward the same target. Up to 5 grazes per wall.
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_touch_held
+vd_touch_graze:
+&vd_graze = &vd_graze + 1
+IF &vd_graze > 4 THEN GOTO vd_err_graze
+&vd_hit = 0
+ON INP(&vd_pin, &vd_trig) GOSUB vd_onhit
+IF &vd_hit = 0 THEN GOTO vd_touch_go
+'it tripped again while standing still - it may have settled into the tripped state
+ON INP(&vd_pin, &vd_trig)
+PAUSE 1
+IF %(&vd_idx) = &vd_trig THEN GOTO vd_touch_held
+GOTO vd_touch_graze
+vd_touch_held:
+'a real contact also stops SHORT of the target.
 &vd_rem = &vd_dist - &vd_trav
-IF &vd_rem < 0.002 * &vd_u THEN GOTO vd_err_false
+IF &vd_rem < 0.002 * &vd_u THEN GOTO vd_err_end
+GOTO vd_touch_ret
+vd_touch_miss:
+&vd_trav = &vd_dist
 GOTO vd_touch_ret
 vd_touch_sim:
 &vd_cx = &vd_px
@@ -778,16 +803,28 @@ RETURN
 ' ERRORS
 '=====================================================================
 vd_err_miss:
+&vd_ecode = 1
 MSGBOX(No contact within the search distance. Park closer to the hole center - or in line with the slot below the bay floor. Check the hole diameter in the window and that the probe triggers. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_err_nowalls:
+&vd_ecode = 2
 MSGBOX(No slot walls found. Park the ball less than 1 inch or 25 mm out from the edge - in line with the slot - at mid slot height below the bay floor. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_err_pretrig:
+&vd_ecode = 3
 MSGBOX(The probe reads DEFLECTED before a move. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
-vd_err_false:
-MSGBOX(The probe triggered without a solid contact - or only at the very end of the search. Park closer to the hole center and try again. If it repeats check the probe cable and connector. Probing aborted.,16,Virtual Dowel)
+vd_err_arm:
+&vd_ecode = 4
+MSGBOX(The probe input changed the moment the search was armed - before any motion. The contact chatters at rest or the line is noisy. Check the cable and both connectors. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_graze:
+&vd_ecode = 5
+MSGBOX(The probe tripped 5 times on one wall without staying tripped - it opens at a graze and closes again. Clean the contacts or add a little spring preload. Probing aborted.,16,Virtual Dowel)
+GOTO vd_lift_abort
+vd_err_end:
+&vd_ecode = 6
+MSGBOX(The probe tripped only at the very end of the search. Park closer to the hole center - or raise Search past the expected wall in Advanced. Probing aborted.,16,Virtual Dowel)
 GOTO vd_lift_abort
 vd_lift_abort:
 IF &vd_sim = 1 THEN GOTO vd_abort
@@ -804,20 +841,27 @@ M2, &vd_x0, &vd_y0
 &vd_inhole = 0
 GOTO vd_abort
 vd_abort:
+WRITE #1; "ERR,"; &vd_ecode; ","; &vd_h; ","; &vd_ax; ","; &vd_sg; ","; &vd_trav; ","; &vd_dist
 CLOSE #1
 MS, &vd_ms0, &vd_mz0
 MSGBOX(Probing aborted - no alignment data was produced. Fix the problem and run the routine again.,48,Virtual Dowel)
 END
 vd_err_notidle:
+&vd_ecode = 7
 MSGBOX(The probe input reads DEFLECTED or the probe is unplugged. Check the cable and the probe input settings - or run the probe calibration to find them.,16,Virtual Dowel)
 GOTO vd_quit
 vd_err_test:
+&vd_ecode = 8
 MSGBOX(The probe did not trigger during the finger test. Check the cable and the probe input settings - or run the probe calibration to find them. Untick Finger test in the window to skip this test.,16,Virtual Dowel)
 GOTO vd_quit
 vd_err_detect:
+&vd_ecode = 9
 MSGBOX(No input changed while the probe tip was held over. Check that the probe cable is plugged in and try again.,16,Virtual Dowel)
 GOTO vd_quit
 vd_quit:
+IF &vd_ecode = 0 THEN GOTO vd_quit_close
+WRITE #1; "ERR,"; &vd_ecode; ",0,0,0,0,0"
+vd_quit_close:
 CLOSE #1
 MS, &vd_ms0, &vd_mz0
 END

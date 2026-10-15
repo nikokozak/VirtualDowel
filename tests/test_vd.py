@@ -195,14 +195,21 @@ class TestProbeRoutineStatic(unittest.TestCase):
         # ON INP only fires on a CHANGE, so each arm must follow a 'reads idle' check
         for i, ln in enumerate(self.lines):
             if re.match(r"^\s*ON INP\(.*\)\s*GOSUB", ln):
+                if self.lines[i + 1].strip() == "IF &vd_hit = 0 THEN GOTO vd_touch_go":
+                    # the graze re-arm: the input was just read idle (a held trip would have gone to
+                    # vd_touch_held), and the move runs only if nothing fired meanwhile
+                    self.assertIn("IF %(&vd_idx) = &vd_trig THEN GOTO vd_touch_held",
+                                  [x.strip() for x in self.lines[i - 6:i]])
+                    continue
                 self.assertRegex(self.lines[i - 1], r"IF %\(&vd_idx\) = &vd_trig THEN GOTO vd_err_pretrig")
                 # wait a (whole) second only if the probe does not read idle yet
                 self.assertRegex(self.lines[i - 2], r"^vd_\w+_arm:$")
                 self.assertEqual(self.lines[i - 3].strip(), "PAUSE 1")
                 self.assertRegex(self.lines[i - 4], r"IF %\(&vd_idx\) = &vd_idle THEN GOTO vd_\w+_arm")
                 # a trigger between arming and the move must stop BEFORE the move runs unguarded
-                self.assertRegex(self.lines[i + 1], r"IF &vd_hit = 1 THEN GOTO vd_err_false")
-                self.assertRegex(self.lines[i + 2], r"^(M2|MZ),")
+                self.assertRegex(self.lines[i + 1], r"IF &vd_hit = 1 THEN GOTO vd_err_arm")
+                nxt = [x for x in self.lines[i + 2:i + 5] if not re.match(r"^(vd_\w+:|&vd_graze = 0)\s*$", x)][0]
+                self.assertRegex(nxt, r"^(M2|MZ),")                  # a label or the graze counter may sit between
 
 
 # =====================================================================================
@@ -574,6 +581,48 @@ class TestProbeRoutineRuns(unittest.TestCase):
         with self.assertRaises(va.ProbeDataError):
             va.parse_probe_data(data_text(vm))
 
+    def test_a_trip_that_clears_again_is_a_graze_and_the_search_goes_on(self):
+        # the user's probe (2026-10-15): the switch opens at a graze and closes again once the machine
+        # stops; a little more push gives a full switch. v2.6 pushes on instead of aborting.
+        vm, m, ui = run_probe(TRUE, list(PARKS), machine_kw={"hold": 0.0025})
+        self.assertEqual(vm.ended, "END")
+        self.assertEqual(len(align_calls(vm)), 1)
+        self.assertEqual(m.collisions, [])
+        self.assertLess(m.max_pen, 0.02)
+        pd, holes, _ = self.check_centers(data_text(vm), TRUE, 0.0015)
+        for h in holes:
+            self.assertLess(h.repeat, 0.002)
+        self.assertNotIn("ERR,", data_text(vm))
+        # a switch that never holds (a pulse output): five grazes on one wall, then its own message
+        vm, m, ui = run_probe(TRUE, list(PARKS), machine_kw={"hold": 1.0})
+        self.assertTrue(any("without staying tripped" in s for s in ui.messages), ui.messages)
+        self.assertEqual(align_calls(vm), [])
+        self.assertGreater(m.z, 0.0)                                         # lifted out
+        text = data_text(vm)
+        self.assertRegex(text, r"ERR, ?5, ?1, ?1, ?1,")
+        with self.assertRaises(va.ProbeDataError) as cm:
+            va.parse_probe_data(text)
+        self.assertIn("tripped 5 times", str(cm.exception))
+        self.assertIn("hole 1, X+", str(cm.exception))
+
+    def test_a_trip_at_the_very_end_of_the_search_has_its_own_message(self):
+        # hole 2 (0.625, the largest: r + margin = 0.33) parked 0.075 in off centre: the far wall sits in
+        # the last 0.002 in of the search
+        far = (TRUE[1][0] - 0.075, TRUE[1][1], 0.1)
+        vm, m, ui = run_probe(TRUE, [PARKS[0], far])
+        self.assertTrue(any("only at the very end of the search" in s for s in ui.messages), ui.messages)
+        self.assertEqual(m.collisions, [])
+        text = data_text(vm)
+        self.assertRegex(text, r"ERR, ?6, ?2, ?1, ?1,")
+        with self.assertRaises(va.ProbeDataError) as cm:
+            va.parse_probe_data(text)
+        self.assertIn("very end", str(cm.exception))
+        # the plain miss writes its line too
+        vm, m, ui = run_probe(TRUE, [PARKS[0], (TRUE[1][0] - 0.1, TRUE[1][1], 0.1)])
+        self.assertTrue(any("No contact within the search distance" in s for s in ui.messages), ui.messages)
+        self.assertRegex(data_text(vm), r"ERR, ?1, ?2, ?1, ?1,")
+        self.assertIn("no contact within the search distance", str(va.err_text(["1", "1", "1", "1", ".2675", ".2675"])))
+
     def test_false_trigger_is_not_accepted_as_a_touch(self):
         # the switch bounces as the 3rd guarded move is armed: that move then runs unguarded
         for n_ok in (0, 1, 2, 5, 9):
@@ -592,7 +641,7 @@ class TestProbeRoutineRuns(unittest.TestCase):
                 return orig(code, pc)
             vm.statement = statement
             vm.run()
-            self.assertTrue(any("without a solid contact" in s for s in ui.messages), (n_ok, ui.messages))
+            self.assertTrue(any("changed the moment the search was armed" in s for s in ui.messages), (n_ok, ui.messages))
             self.assertEqual(m.collisions, [])
             self.assertLess(m.max_pen, 0.02)          # nothing ran unguarded
             self.assertEqual(align_calls(vm), [])
