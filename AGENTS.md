@@ -65,6 +65,7 @@ INSTALL.bat      the only file the operator double-clicks: app\vd_align.bat --in
 make_zip.py      builds the shop zip: the repo is flat, the zip puts the program in app/ under a clean top level
 docs/guide.html  operator guide for thick stock (half slots): Fusion setup, sizes, probing; offline, no external files
 docs/thick-stock-plan.md  design plan and status of the thick-stock modes
+docs/feature-probing-plan.md  design plan: side-neutral words (v2.7) and the Probe features tab (v2.8+)
 tests/test_vd.py   unittest suite
 tests/sbp_vm.py    OpenSBP interpreter plus a simulated ShopBot and probe
 tests/sim_sbp.py   independent toolpath sampler that verifies the rewriter
