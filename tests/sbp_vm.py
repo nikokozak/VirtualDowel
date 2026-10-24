@@ -432,6 +432,7 @@ class VM:
         self.closed = {}
         self.shell = []
         self.fp = []
+        self.va = []             # VA lines: recorded only
         self.printed = []
         self.commands = []
         self.ended = None
@@ -630,6 +631,10 @@ class VM:
                 mc.vxy = vals[0]
             if len(vals) > 1 and vals[1] is not None:
                 mc.vz = vals[1]
+            return pc + 1
+        if cmd == "VA":
+            # recorded only: what VA does to %(1)/%(6) is what vd_selftest_loop.sbp asks the machine
+            self.va.append(tuple(vals))
             return pc + 1
         if cmd == "C7":
             return pc + 1

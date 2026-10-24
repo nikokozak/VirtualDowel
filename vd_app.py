@@ -1,10 +1,10 @@
 """
-Virtual Dowel - vd_app.py  v2.5  (2026-10-13)
+Virtual Dowel - vd_app.py  v2.7  (2026-10-23)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 The Virtual Dowel window. One window for the whole job:
 
-  prepare    before probing (the custom cut C80 opens it): side-B files, reference holes, stock box,
+  prepare    before probing (the custom cut C80 opens it): job files, reference holes, stock box,
              probe settings, checks. Start writes vd_run.sbp, which ShopBot runs next. When usable probe
              data is on file, "Align with this data" turns the window into the results window instead.
   align      after probing (vd_run.sbp opens it): aligns every file at once and lists PASS / FAIL.
@@ -50,27 +50,30 @@ def _fmt(v: Optional[float]) -> str:
 
 
 METHODS = {
-    "holes": ("Through holes", "Two holes of different sizes, cut through the board by side A on the flip axis. "
-              "The most accurate. Needs the Z travel to lift a cutter as long as the board is thick above the board."),
+    "holes": ("Two holes", "Two holes of different sizes, in job coordinates. The most accurate. For a flip: cut them "
+              "through the board on the flip axis during the first side - that needs the Z travel to lift a cutter "
+              "as long as the board is thick above the board."),
     "slots": ("Half slots", "For thick boards: two slots in the board's edges, cut half depth by side A. On side B a "
               "short bay cut opens them, then the probe comes in from the side. Sizes: click Slot and bay sizes."),
     "through": ("Through slots", "Two slots in the board's edges, cut through from outside with a bit as long as the "
                 "board is thick. Use when that bit cannot be lifted above the board."),
-    "centre": ("Centre and line", "No flip. Any part - a 3D print, a casting, a found object - is placed by two "
-               "references: bores in its top face or notches in its edge, on a line through the job's X0 Y0, halfway "
+    "centre": ("Centre and line", "For a part that is not exact in size and not flipped - a 3D print, a casting, "
+               "a found object. It is placed by two references: bores in its top face or notches in its edge, on a line through the job's X0 Y0, halfway "
                "between them. Their spacing is reported, not checked, so a part that shrank or grew still goes to "
                "the midpoint, turned to the line."),
 }
-STEPS = {"holes": ("Prepare", "Probe", "Align", "Cut side B"), "through": ("Prepare", "Probe", "Align", "Cut side B"),
+STEPS = {"holes": ("Prepare", "Probe", "Align", "Cut"), "through": ("Prepare", "Probe", "Align", "Cut side B"),
          "slots": ("Prepare", "Rough locate", "Cut bays", "Probe", "Align", "Cut side B"),
          "centre": ("Prepare", "Probe", "Align", "Cut")}
 REFS = {"holes": "Bores in the top face", "through": "Notches in the edge"}     # centre and line: the references
 
 NEXT = {
-    "holes": """Through holes - what to do now
-  Before this: side A has cut two holes of different sizes through the board, on the flip axis.
-  1. Add files: the side-B job files from Fusion or VCarve, one per tool.
-  2. Enter each hole: X and Y of its centre and its diameter, in side-B (Setup 2) coordinates.
+    "holes": """Two holes - what to do now
+  Before this: the part has two holes of different sizes. For a flip: the first side cut them through
+  the board, on the flip axis.
+  1. Add files: the job files to align, from Fusion or VCarve, one per tool.
+  2. Enter each hole: X and Y of its centre and its diameter, in job coordinates. Reference positions in
+     the coordinates of the files you align. In Fusion: the setup of these files.
   3. Stock box: only if a file does not state its stock size (the note says).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE, plug in its cable, and click Start probing.
@@ -79,7 +82,7 @@ NEXT = {
     "slots": """Half slots - what to do now
   Before this: side A has cut two half slots in the board's edges, on the flip axis, of different widths.
   1. Add files: the side-B job files, and choose the bay cut file (made in Fusion).
-  2. Enter each slot: X and Y of its round-end centre and its width, in side-B coordinates.
+  2. Enter each slot: X and Y of its round-end centre and its width, in job coordinates.
   3. Stock box: needed unless a file states its stock size (the note says).
   4. Click Check and fix anything marked FAIL.
   5. Fit the BAY CUTTER and click Start rough locate.
@@ -95,7 +98,7 @@ NEXT = {
     "through": """Through slots - what to do now
   Before this: side A has cut two slots through the board in its edges, on the flip axis, of different widths.
   1. Add files: the side-B job files, one per tool.
-  2. Enter each slot: X and Y of its round-end centre and its width, in side-B coordinates.
+  2. Enter each slot: X and Y of its round-end centre and its width, in job coordinates.
   3. Stock box: needed unless a file states its stock size (the note says).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE and click Start probing. At each slot, jog the probe ball outside the opening -
@@ -106,7 +109,8 @@ NEXT = {
   own coordinates. Clamp the part square to the table, within 5 degrees.
   1. Add files: the job files for the part, one per tool.
   2. References: choose bores or notches. Enter each: X and Y of its centre (notch: round-end centre) and
-     its diameter (notch: width), in job coordinates. Exactly two.
+     its diameter (notch: width), in job coordinates. Exactly two. Reference positions in the coordinates
+     of the files you align.
   3. Stock box: the part's outline in job coordinates. Notches need it (which edge each opens to).
   4. Click Check and fix anything marked FAIL.
   5. Fit the PROBE and click Start probing. Bores: jog the probe over each bore. Notches: jog the ball
@@ -167,7 +171,7 @@ class App:
     def pick_files(self) -> List[str]:
         st = va._load_state()
         got = filedialog.askopenfilenames(
-            parent=self.root, title="Side-B job files (.sbp) - Ctrl-click or Shift-click for several",
+            parent=self.root, title="Job files (.sbp) - Ctrl-click or Shift-click for several",
             initialdir=st.get("last_dir") or os.path.expanduser("~"),
             filetypes=[("ShopBot part files", "*.sbp"), ("All files", "*.*")])
         files = list(self.root.tk.splitlist(got)) if got else []
@@ -202,8 +206,8 @@ class App:
             pass
 
     # ------------------------------------------------------------------ layout
-    JOBS_TITLE = "Side-B job files - the files for the flipped side, one per tool"
-    STOCK_TITLE = "Stock box - side-B coordinates"
+    JOBS_TITLE = "Job files - one per tool"
+    STOCK_TITLE = "Stock box - job coordinates"
 
     def _build_main(self) -> None:
         r = self.root
@@ -230,7 +234,7 @@ class App:
                 ttk.Radiobutton(self.ref_frame, text=txt, value=val, variable=self.ref_var,
                                 command=self._on_locate_mode).pack(side="left", padx=(10, 0))
 
-        # side-B files
+        # job files
         jf = self.jobs_frame = ttk.LabelFrame(outer, text=self.JOBS_TITLE, padding=6)
         jf.pack(fill="both", expand=False)
         cols = ("file", "result", "rotation", "spacing", "output")
@@ -251,7 +255,7 @@ class App:
         mid = ttk.Frame(outer)
         mid.pack(fill="x", pady=(8, 0))
         # reference holes
-        hf = ttk.LabelFrame(mid, text="Reference holes - side-B design coordinates", padding=6)
+        hf = ttk.LabelFrame(mid, text="Reference holes - job coordinates", padding=6)
         hf.pack(side="left", fill="both", expand=True)
         self.holes_frame = hf
         self.mid = mid
@@ -403,12 +407,12 @@ class App:
             title = ("References - X and Y of the centre (notch: round-end centre) and the diameter (notch: width) "
                      "- job coordinates")
         elif slots:
-            title = "Slots - X and Y of the round-end centre and the width - side-B coordinates"
+            title = "Slots - X and Y of the round-end centre and the width - job coordinates"
         else:
-            title = "Reference holes - X and Y of the centre and the diameter - side-B coordinates"
+            title = "Reference holes - X and Y of the centre and the diameter - job coordinates"
         self.holes_frame.configure(text=title)
         centre = self.method == "centre"
-        self.jobs_frame.configure(text="Job files for the part - one per tool" if centre else self.JOBS_TITLE)
+        self.jobs_frame.configure(text=self.JOBS_TITLE)
         self.stock_frame.configure(text="Part outline - job coordinates" if centre else self.STOCK_TITLE)
         self.size_header.configure(text="Width" if slots else "Diameter")
         self.add_hole_btn.configure(text="+ Add slot" if slots else "+ Add hole")
@@ -993,9 +997,9 @@ class App:
         if not errs:
             errs = va.hole_errors(holes, m["tip"])
         if not self.jobs:
-            errs.append("add the side-B job files")
+            errs.append("add the job files")
         elif self.probe_mode() != "holes" and va.slot_box(self.jobs, stock) is None:
-            errs.append("slots need the stock box (side-B coordinates): it tells which edge each slot opens to")
+            errs.append("slots need the stock box (job coordinates): it tells which edge each slot opens to")
         if errs:
             self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
             self._set_status("Not ready", RED)
@@ -1036,7 +1040,7 @@ class App:
         if not bay:
             errs.append("choose the bay cut file")
         if not self.jobs:
-            errs.append("add the side-B job files")
+            errs.append("add the job files")
         if errs:
             self._set_text("Fix these first:\n\n" + "\n".join("  - " + e for e in errs))
             self._set_status("Not ready", RED)
@@ -1121,7 +1125,7 @@ class App:
         elif self.pd is not None and self.jobs and all(any(t) for t in self._hole_texts()):
             self.on_align()
         elif self.pd is not None:
-            self._set_text("Add the side-B files and check the hole or slot values, then click Align.")
+            self._set_text("Add the job files and check the hole or slot values, then click Align.")
 
     def on_align(self) -> None:
         if self.pd is None or self.stale:
@@ -1132,7 +1136,7 @@ class App:
         stock, e2 = self.read_stock()
         errs += e2
         if not self.jobs:
-            errs.append("add the side-B job files")
+            errs.append("add the job files")
         if len(holes) != self.pd.nholes:
             errs.append(f"probing measured {self.pd.nholes} but the table has {len(holes)} - add or remove rows")
         if errs:

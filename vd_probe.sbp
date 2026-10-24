@@ -1,12 +1,12 @@
 '=====================================================================
-' VIRTUAL DOWEL  -  vd_probe.sbp   v2.6  (2026-10-15)
+' VIRTUAL DOWEL  -  vd_probe.sbp   v2.7  (2026-10-23)
 ' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 '
 ' Finds the centers of two or more reference through-holes - or half slots
 ' at the stock edges for thick stock - with the
 ' ShopBot digitizing probe and writes the raw touch data for
-' vd_align.py, which then rotates and shifts the side-B job file so it
-' lines up with the holes.
+' vd_align.py, which then rotates and shifts the job files so they
+' line up with the holes.
 '
 ' Normal use: type the Virtual Dowel custom cut (C80) in ShopBot. It opens the
 ' Virtual Dowel window - choose files - holes - probe settings there - and the

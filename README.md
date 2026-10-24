@@ -1,16 +1,18 @@
-# Virtual Dowel: flip-milling alignment for ShopBot (SB3)
+# Virtual Dowel: alignment by probed references for ShopBot (SB3)
 
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
-Virtual Dowel replaces dowel pins with two reference holes and the ShopBot digitizing probe.
+Virtual Dowel aligns your job files to two or more reference holes that the ShopBot digitizing probe finds. Its main use is flip milling, where it replaces dowel pins:
 
 1. On side A, the job cuts two reference holes through the waste.
 2. After you flip the board, the probing routine finds the centres of those holes to within a few thousandths of an inch.
 3. The alignment script then rotates and shifts your side-B `.sbp` files so they match where the board actually lies.
 
+The same works for any part with two references: a second setup, a part clamped again, a 3D print (section 3c).
+
 Everything happens in one **Virtual Dowel window**, opened from ShopBot with the custom cut **C80**: choose the files, holes and probe settings, click Start, probe, and the same window shows the results.
 
-You don't square the board to the machine, and you don't zero X or Y on side B.
+You don't square the board to the machine, and you don't zero X or Y.
 
 ```
 VirtualDowel\
@@ -23,6 +25,8 @@ VirtualDowel\
     vd_app.py        the Virtual Dowel window (double-click it to open the prepare window without ShopBot)
     vd_align.bat     double-click to open the results window on the last probe data (C80 does this too)
     vd_selftest.sbp  offline check of SB3 behaviour (Preview mode, no motion)
+    vd_selftest_loop.sbp  check of FP, END and VA for the coming Probe features tab (Move mode, no motion);
+                     vd_selftest_end.sbp and vd_selftest_noend.sbp are its parts
 made by INSTALL.bat / the window, inside app\:
   venv\            the Python that SB3 starts (pythonw.exe: no console window)
   vd_start.sbp     opens the window, then runs vd_run.sbp (same as the custom cut)
@@ -33,7 +37,7 @@ made by INSTALL.bat / the window, inside app\:
 
 ---
 
-## 1. Design rules for side A (read this first)
+## 1. Design rules for the reference holes (read this first)
 
 Put **two reference holes** in the waste. Follow all of these rules:
 
@@ -90,7 +94,7 @@ The script doesn't care where Setup 2's origin is. It needs one thing: the hole 
    - The folder path may only contain letters, digits, `_` and `.`: no spaces, `-`, `~` or other symbols. ShopBot's SHELL changes those characters when it starts the script. On your SB3 it put spaces around `/` and deleted `~`. The installer refuses a path that breaks this rule.
    - Watch for a doubled folder (`VirtualDowel\VirtualDowel`) after unzipping.
 3. **Double-click `INSTALL.bat`** in that folder. It:
-   - points `app\vd_probe.sbp` and `app\vd_selftest.sbp` at the folder they are in;
+   - points `app\vd_probe.sbp`, `app\vd_selftest.sbp` and `app\vd_selftest_loop.sbp` at the folder they are in;
    - makes a small Python environment in `app\venv`, whose `pythonw.exe` has a plain path ShopBot can start;
    - writes `app\vd_start.sbp` and the custom cut **`C:\SbParts\Custom\Custom80.sbc`**. If Custom80 is someone else's file, it uses the next free number up to 89; it never overwrites a custom cut that isn't Virtual Dowel's. The last lines say which number it used: that is what you type in ShopBot.
 4. **Calibrate the probe once** (section 3a). It finds the probe's input and measures it; the settings are saved for every later run.
@@ -103,14 +107,14 @@ You no longer edit `vd_probe.sbp`. The window keeps the probe settings in `vd_ma
 
 ## 3. Each job
 
-1. **Side A:** run your side-A file, which includes the two holes. Flip the board over the planned axis and clamp it anywhere, at any angle, as long as it is within about ±5°.
+1. **For a flip:** run your side-A file, which includes the two holes, then flip the board over the planned axis. Clamp the board (or any part with two references) anywhere, at any angle, as long as it is within about ±5°.
 2. Put the **probe** in the collet and plug in its cable. You don't need to zero X or Y.
 3. **Type `C80`** in ShopBot (Move mode). The Virtual Dowel window opens at step 1, **Prepare**:
-   - **Side-B job files:** *Add files...* and select all of them at once, e.g. one per tool.
-   - **Reference holes:** X, Y and diameter in side-B design coordinates. *+ Add hole* for a third. They are remembered per file and pre-filled next time.
+   - **Job files:** *Add files...* and select all of them at once, e.g. one per tool.
+   - **Reference holes:** X, Y and diameter in job coordinates. Reference positions in the coordinates of the files you align - for a flip, the side-B files. *+ Add hole* for a third. They are remembered per file and pre-filled next time.
    - **Stock box:** only if a file doesn't state its stock size (Fusion). The note under it says whether it's needed and shows the toolpaths' extent.
    - **Probe:** input, deflected state, ball diameter, fine passes, spin-180, finger test. *Advanced...* has the depths and speeds. A changed setting is kept, also when you close without starting. *Dry run* probes nothing and asks you to type the hole positions (use it in Preview).
-   - *Check* runs every check that doesn't need the probe on every file: hole layout, stock box, side-A/side-B ambiguity, files the script can't rewrite. A file that would fail even with perfect probing is marked **FAIL** before you probe.
+   - *Check* runs every check that doesn't need the probe on every file: hole layout, stock box, mirror ambiguity, files the script can't rewrite. A file that would fail even with perfect probing is marked **FAIL** before you probe.
    - **Start probing** checks again, removes aligned files and probe data from earlier runs (the board has moved), writes `vd_run.sbp` with your settings, and closes. ShopBot runs it straight away. Its first message names the time it was prepared, so an old run file is easy to spot.
    - Files in mm work too: hole values are in the file's units, and every selected file must use the same units.
    - *Close without starting* runs nothing.
@@ -166,9 +170,9 @@ py -3 vd_align.py sizes --ball 0.125 --stem 0.08 --free 1 --body 0.8 --length 3 
 
 **Each job.**
 
-1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. The round-end centre must be at least 0.25 in inside the edge, plus the slot width difference; the size calculator says the exact number. Enter the X and Y of each round-end centre in side-B coordinates. Zero X/Y at the Setup 1 WCS corner and run side A.
+1. Side A: two slots on the flip axis, one in each end of the board, different widths, cut inward from outside to a round end. The round-end centre must be at least 0.25 in inside the edge, plus the slot width difference; the size calculator says the exact number. Enter the X and Y of each round-end centre in job coordinates (the side-B files). Zero X/Y at the Setup 1 WCS corner and run side A.
 2. Flip and clamp. Keep the slot openings free.
-3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate side B with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter fitted)**. Jog the bit tip over each slot opening; each message names the slot, its width and the edge it opens to (the key notch last, if you cut one).
+3. Fit the bay cutter. Type `C80`, choose **Half slots** under *Locate the part with*, add the side-B files, enter the slots and the stock box, choose the bay cut file, and click **Start rough locate (bay cutter fitted)**. Jog the bit tip over each slot opening; each message names the slot, its width and the edge it opens to (the key notch last, if you cut one).
 4. The window says which file to run: `<bay file>_VDROUGH.sbp`. Look at it in Preview, zero Z with the bay cutter, and run it. Do not zero X or Y.
 5. Vacuum the slots. Fit the probe. Type `C80` and click **Start probing (probe fitted)**. At each slot, jog the probe ball outside the opening, anywhere up to 1 in out, in line with the slot, at the park height from the size calculator. The routine finds the round end first, so the exact distance does not matter.
 6. The window aligns the side-B files as usual. Fit each cutter, zero Z only, and run each `_VD.sbp`.
@@ -182,7 +186,7 @@ Nothing of the half-slot mode has run on the machine yet. Please do these in ord
 **H0. Install (2 min).** Copy the new VirtualDowel folder to the shop PC and double-click `INSTALL.bat`. It writes the new custom cut.
 
 **H1. Dry run in Preview (10 min, no motion).**
-1. In Preview, type `C80`. Under *Locate side B with*, choose **Half slots**. Add `docs\example\sideB_example.sbp` as the side-B file (it states its 24 x 30 in stock size). Enter slot 1 as X 1.5, Y 15, width 0.625 and slot 2 as X 22.5, Y 15, width 0.75. Choose `docs\example\bays_example.sbp` as the bay file. Tick **Dry run** and click **Start rough locate**.
+1. In Preview, type `C80`. Under *Locate the part with*, choose **Half slots**. Add `docs\example\sideB_example.sbp` as the side-B file (it states its 24 x 30 in stock size). Enter slot 1 as X 1.5, Y 15, width 0.625 and slot 2 as X 22.5, Y 15, width 0.75. Choose `docs\example\bays_example.sbp` as the bay file. Tick **Dry run** and click **Start rough locate**.
 2. When asked, type the X and Y of each slot opening and `0`: `0.05, 15.1, 0` for slot 1 and `24.03, 15.2, 0` for slot 2.
 3. A window should say "Bay file placed" and name a `_VDROUGHSIM.sbp` file (Preview only).
 4. Type `C80` again, keep Dry run, click **Start probing**, and type each slot's round-end centre and width when asked: `1.5, 15, 0.625` and `22.5, 15, 0.75`. The window should align with PASS and write `sideB_example_VDSIM.sbp`.
@@ -201,7 +205,7 @@ Use this for a part that is not flip-milled and whose size is not exact: a 3D pr
 Design rules:
 1. Make two references in the part: bores in the top face (through, or blind and deeper than the probe plunge depth under Advanced) or notches in an edge (open to the top and to the side). Make them different sizes, for example 0.5 and 0.625 in. With equal sizes a part placed half a turn round passes unnoticed, and the job is cut turned.
 2. Put them on one line through the job's X0 Y0, with X0 Y0 halfway between them. The report warns when the design midpoint is not at X0 Y0.
-3. The job files are in the part's own coordinates. No side A, no side B.
+3. The job files are in the part's own coordinates. No flip.
 
 Each job:
 1. Clamp the part to the table, square within 5 degrees. Do not zero X or Y.
@@ -234,7 +238,7 @@ Not yet run on the machine. The first test: a 3D print with two bores, a job tha
 - the spacing error is more than 0.02 in
 - hole scatter or out-of-roundness is too large
 - a hole lies outside the material box in the job header
-- the hole numbers could be the side-A numbers: the mirrored layout fits the probe data just as well and would shift the job by more than 0.1 in
+- the mirror image of the hole positions (from the files of the other side) fits the probe data just as well and would shift the job by more than 0.1 in
   - Smaller shifts, e.g. holes a few hundredths off the centreline, only warn.
   - If the job file has no material size and you skip the stock-size question, any 2-hole layout fails this check.
 - the job has bare-CR or mixed line endings, or contains no X/Y moves
@@ -316,11 +320,21 @@ It also checks:
 
 **Offline D: Stage 0 below.** It runs entirely in Preview.
 
+### Loop self-test (v2.7, Move mode, no motion)
+
+The coming *Probe features* tab needs three answers from SB3 first: does a file called with `FP` pass a variable back, does the caller go on after `END` in the called file, and what does `VA` (set the X/Y location) change. This file asks them. It has no motion commands. It moves the X/Y zero by 1 in and back, and checks that it came back.
+
+1. Run `INSTALL.bat` (it points the test at its folder).
+2. In SB3, in **Move** mode, with the machine where it is: `FP` → `app\vd_selftest_loop.sbp`.
+3. You see "Loop self-test finished". If SB3 stops with an error instead, write down the line number and the message. If the run ends with no message at all, that is an answer too: send the files that exist.
+4. Zero X and Y as usual before your next job. (`%(1)` reads to 0.001 in, so the zero can come back up to 0.0005 in from where it was.)
+5. Send me `vd_selftest_loop_a.txt` to `vd_selftest_loop_d.txt` from the `app` folder. Each file starts with a `DT` line: a file with an older date is left over from an earlier run. a has the values before the test; b `VA_PLUS_1` against a `BEFORE` = what `VA` changes, and `VA_BACK` = that it came back; c exists = the caller goes on after a file with no `END`, and `VAR_FROM_NOEND_FILE,1` = variables pass back; d exists = the caller goes on after `END`. The `END` test is last, so if `END` stops the whole run, a to c are already written.
+
 ### With the machine
 
 **Stage 0: the v2.0 window, dry run, no motion (10 min).** New in v2.0 and not yet seen on your machine: the custom cut, `FP` from inside it, and `pythonw.exe` (no console window).
 1. In **Preview**, type `C80`. The window should open in front of ShopBot.
-2. Add a real side-B file, enter its holes (and the stock box if asked), tick **Dry run**, click *Check*, then **Start probing**.
+2. Add a real job file, enter its holes (and the stock box if asked), tick **Dry run**, click *Check*, then **Start probing**.
 3. ShopBot should go straight on to the probing run. When asked, type the probed positions as `X, Y, diameter`: move both holes together, e.g. `4.30, 2.85, 0.6` and `11.3197, 2.9113, 0.8` for holes at (4.2, 2.8) and (11.22, 2.8), a 0.5° turn.
 4. The window should reopen at Align with PASS and a `_VDSIM.sbp`, which only runs in Preview.
 5. Type `C80` again and *Close* the window: nothing should run.
@@ -328,7 +342,7 @@ It also checks:
 If any step doesn't happen, the troubleshooting table has the fallback; send me `vd_launch.log`. **If SB3 reports an error on any line, send me the line number and the message.**
 
 **Stage 1: your real files (5 min).**
-1. Using the Stage 0 data, align two or three of your real side-B jobs.
+1. Using the Stage 0 data, align two or three of your real jobs.
 2. Look at the rotated toolpath of each `_VDSIM.sbp` in Preview.
 
 Anything the script refuses, it tells you why. Send me those lines.
@@ -367,7 +381,7 @@ Anything the script refuses, it tells you why. Send me those lines.
 | "tripped 5 times on one wall without staying tripped" | The switch opens at a graze and closes again when the machine stops. The routine pushes on from a graze, up to five times; a probe that never holds (a pulse output) cannot be used. Clean the contacts or add a little spring preload. |
 | "touched something while lowering" | Not over the hole, or the hole is shallower than the plunge depth (Advanced...) plus the park height. |
 | Aligned file stops with "file offset or X/Y proportion" | An offset or proportion is set in the FP fill-in sheet. Clear it: offset off, proportions 1. On your SB3, these read 0 and 1 when nothing is set. |
-| "side-A numbers fit the probe data just as well" | Move the holes onto the flip axis, or add a third hole that is not in line with the other two. The override `{"allow_offaxis_ambiguity": 1}` only warns. |
+| "the mirror image of these positions also fits" | Move the holes onto the flip axis, or add a third hole that is not in line with the other two. The override `{"allow_offaxis_ambiguity": 1}` only warns. |
 | "bare CR" or "mixes CRLF and LF" | Re-save the job from VCarve, or in SbEdit or Notepad, with Windows line endings. |
 | "layout looks the same after a half turn" | Use different hole sizes, or add `{"allow_symmetric_layout": 1}`. You then accept the risk of a wrong flip. |
 

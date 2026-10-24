@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Virtual Dowel - vd_align.py  v2.6  (2026-10-15)
+Virtual Dowel - vd_align.py  v2.7  (2026-10-23)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Reads the raw touch data written by vd_probe.sbp, computes the centers of the
-reference holes, fits the rotation + translation that maps the side-B job's
-design coordinates onto the probed machine coordinates, and writes a rotated /
-shifted copy of the side-B OpenSBP (.sbp) job file ("<name>_VD.sbp").
+reference holes, fits the rotation + translation that maps the job's design
+coordinates of the references onto the probed machine coordinates, and writes a
+rotated / shifted copy of each OpenSBP (.sbp) job file ("<name>_VD.sbp").
 
 Standard library only (Python 3.8+). tkinter is used for the file picker and
 dialogs when it is available; everything also works from the command line:
 
-    python vd_align.py --data vd_probe_data.csv --job sideB.sbp --holes "12,1,0.5;12,29,0.625"
+    python vd_align.py --data vd_probe_data.csv --job job.sbp --holes "12,1,0.5;12,29,0.625"
     (add --stock "24,30" for posts such as Fusion's that do not write the stock size)
 
 Exit codes: 0 = PASS (file written), 1 = FAIL (checks failed / unsupported file),
@@ -35,7 +35,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-VERSION = "2.6"
+VERSION = "2.7"
 __author__ = "Nikolai Kozak"
 __copyright__ = "Copyright (c) 2026 Nikolai Kozak. All rights reserved."
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -570,8 +570,8 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
     failures: List[str] = []
     warnings: List[str] = []
     if layout_is_symmetric(design, tol["symmetry_tol"], 4 * tol["diameter_rel_tol"]):
-        msg = ("this hole layout looks the same after a half turn, so a board flipped the WRONG WAY "
-               "(end over end instead of side over side) would pass unnoticed. Make the holes different "
+        msg = ("this hole layout looks the same after a half turn, so a part placed the wrong way round - "
+               "or, for a flip, flipped the WRONG WAY - would pass unnoticed. Make the holes different "
                "sizes at least 0.1 in apart (e.g. 0.500 and 0.625 in) or add a hole off-centre")
         if centre:
             warnings.append("both references have about the same size, so a part placed half a turn round "
@@ -619,8 +619,8 @@ def align(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[st
         f, perm, sp, worst, bias = min(cands, key=lambda c: (abs(c[0].theta), c[0].rms))
         if abs(f.theta) > max_rot:
             failures.append(f"rotation {math.degrees(f.theta):+.3f} deg exceeds the "
-                            f"{th['max_rotation_deg']:.1f} deg limit - board flipped the wrong way, wrong "
-                            "hole coordinates, or wrong side")
+                            f"{th['max_rotation_deg']:.1f} deg limit - wrong hole coordinates, the part placed "
+                            "the wrong way round, or (for a flip) flipped the wrong way")
         if worst > tol["spacing_fail"] and not centre:
             failures.append(f"hole spacing differs from the design by {worst:.4f} "
                             f"(limit {tol['spacing_fail']:.4f}) - wrong hole coordinates or a bad touch")
@@ -782,8 +782,8 @@ def has_mirror_symmetry(design: Sequence[DesignHole], tol: float, dtol: float) -
 
 def mirror_alternatives(design: Sequence[DesignHole], holes: Sequence[HoleResult], th: Dict[str, float],
                         scale: float, nominal: float, box) -> List[Tuple[str, Fit]]:
-    """The classic mistake: typing the SIDE-A numbers of the holes instead of the side-B ones.
-    Side-A numbers are the side-B numbers mirrored about the flip axis. If the mirrored layout
+    """The classic mistake: typing hole positions from the files of the other side instead of the files
+    being aligned. Those are the right positions mirrored about the flip axis. If the mirrored layout
     fits the probe data just as well, the probe data cannot tell the two apart and the job could
     be shifted by up to the board width. Returns the mirrored layouts that fit."""
     x0, y0, x1, y1 = box
@@ -1603,7 +1603,7 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
             if cov < 0.5:
                 fails.append(f"the {box_src} (X {box[0]:g}..{box[2]:g}, Y {box[1]:g}..{box[3]:g}) does not cover "
                              f"the toolpaths (X {tp[0]:.3f}..{tp[2]:.3f}, Y {tp[1]:.3f}..{tp[3]:.3f}) - check which "
-                             "corner the side-B origin is at (e.g. a back-left origin puts the stock at negative Y)")
+                             "corner the job origin is at (e.g. a back-left origin puts the stock at negative Y)")
                 box = None                       # an inconsistent box cannot support the checks below
                 box_src = "bad"
     if box is not None:
@@ -1617,10 +1617,10 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
         if not al.failures and not centre:
             for name, alt in mirror_alternatives(design, holes, th, pd.scale, pd.nominal, box):
                 shift = math.hypot(alt.tx - al.fit.tx, alt.ty - al.fit.ty)
-                msg = (f"these holes have different side-A and side-B coordinates ({name} flip), and the "
-                       "side-A numbers fit the probe data just as well - if they were typed by mistake the "
-                       f"job would be shifted by {shift:.3f} {pd.unit_name}. Put the holes on the flip axis "
-                       "(material centerline) or use 3 holes that are not in a line")
+                msg = (f"the mirror image of these positions ({name}) also fits the probe data - check that "
+                       "they come from the files you align, not from the files of the other side: a mix-up "
+                       f"would shift the job by {shift:.3f} {pd.unit_name}. Put the holes on the flip axis "
+                       "(material centreline) or use 3 holes that are not in a line")
                 if shift < th["mirror_shift_warn_only"] * pd.scale:
                     warns.append(msg)
                 elif th.get("allow_offaxis_ambiguity", 0):
@@ -1630,7 +1630,8 @@ def run_alignment(data_path: str, job_path: str, design: List[DesignHole],
     elif box_src != "bad" and not centre and has_mirror_symmetry(design, th["symmetry_tol"] * pd.scale,
                                                   4 * th["diameter_rel_tol"] * pd.scale):
         msg = ("the job header has no material size (Fusion's ShopBot post does not write it), so the "
-               "script cannot tell whether side-A hole coordinates were typed instead of side-B ones - and "
+               "script cannot tell whether these positions are the mirror image of the right ones (from the "
+               "files of the other side) - and "
                "with this hole layout both would fit. Enter the stock size when asked (or --stock), or use "
                "3 holes that are not in a line")
         if th.get("allow_offaxis_ambiguity", 0):
@@ -1882,7 +1883,7 @@ def start_file_text(py: str, script: str, run_file: str, custom: bool = False) -
     so if Python does not start at all, the FP runs nothing instead of an earlier job's probing run."""
     lines = [CUSTOM_CUT_MARK if custom else "'VIRTUAL DOWEL - vd_start.sbp",
              "'Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.",
-             "'Opens the Virtual Dowel window: choose the side-B files - holes - probe settings there.",
+             "'Opens the Virtual Dowel window: choose the job files - references - probe settings there.",
              "'Clicking Start in the window writes vd_run.sbp - which ShopBot then runs here.",
              "'Written by INSTALL.bat - run it again if the VirtualDowel folder moves.",
              "'Empty vd_run.sbp first - if the window cannot start nothing old runs.",
@@ -1936,7 +1937,7 @@ def install_custom_cut(text: str, custom_dir: Optional[str]) -> str:
 
 
 def install_paths(folder: str = HERE, make_venv: bool = True, custom_dir: Optional[str] = None) -> List[str]:
-    """Rewrite the path lines of vd_probe.sbp and vd_selftest.sbp so they point at `folder`, write
+    """Rewrite the path lines of vd_probe.sbp, vd_selftest.sbp and vd_selftest_loop.sbp so they point at `folder`, write
     vd_start.sbp, an empty vd_run.sbp and the custom cut. Returns a list of human-readable changes.
     Raises VDError when the path cannot work in SB3."""
     if custom_dir is None and os.name == "nt":
@@ -1961,6 +1962,10 @@ def install_paths(folder: str = HERE, make_venv: bool = True, custom_dir: Option
             (r"^&st_out\s*=.*$", f'&st_out = "{j("vd_selftest_variable.txt")}"'),
             (r"^&st_pyexe\s*=.*$", f'&st_pyexe = "{py}"'),
             (r"^&st_script\s*=.*$", f'&st_script = "{j("vd_align.py")}"'),
+        ],
+        "vd_selftest_loop.sbp": [
+            (r"^FP,.*vd_selftest_end\.sbp\s*$", f"FP,{j('vd_selftest_end.sbp')}"),
+            (r"^FP,.*vd_selftest_noend\.sbp\s*$", f"FP,{j('vd_selftest_noend.sbp')}"),
         ],
     }
     done = []
@@ -2266,7 +2271,7 @@ def precheck_jobs(jobs: Sequence[str], design: List[DesignHole], stock: Optional
                   th: Optional[Dict[str, float]] = None, centre: bool = False) -> List[Tuple[str, Result]]:
     """Every check that does not need the probe: run each job through the alignment with made-up
     probe data that matches the design exactly. Catches a wrong hole layout, a stock box that does
-    not fit, side-A/side-B ambiguity and job files the script cannot rewrite - before probing."""
+    not fit, mirror ambiguity and job files the script cannot rewrite - before probing."""
     import tempfile
     th = th or load_settings()
     out: List[Tuple[str, Result]] = []
@@ -2340,7 +2345,7 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     if any(d[2] is None for d in design):
         errs.append("every hole needs a diameter (the probing distance and the hole check use it)")
     if not jobs:
-        errs.append("add the side-B job files")
+        errs.append("add the job files")
     missing = [j for j in jobs if not os.path.isfile(j)]
     if missing:
         errs.append("file not found: " + "; ".join(missing))
@@ -2348,14 +2353,14 @@ def prepare_probing(jobs: Sequence[str], design: List[DesignHole], stock: Option
     if mode != "holes" and not errs:
         box = slot_box(jobs, stock)
         if box is None:
-            errs.append("slots need the stock box (side-B coordinates): it tells which edge each slot opens to")
+            errs.append("slots need the stock box (job coordinates): it tells which edge each slot opens to")
         else:
             opens.update({f"open{i}": OPEN_CODES[open_side(d[0], d[1], box)] for i, d in enumerate(design, 1)})
     if errs:
         return Prepared(False, errs, [])
     units = {job_units(j) for j in jobs} - {None}
     if len(units) > 1:
-        return Prepared(False, ["the side-B files mix inches and mm - align the inch and mm files separately"], [])
+        return Prepared(False, ["the job files mix inches and mm - align the inch and mm files separately"], [])
     to_in = 1 / 25.4 if units == {1} else 1.0          # the routine's settings are in inches
     errs = hole_errors(design, machine["tip"] / to_in, scale=1 / to_in)
     if mode != "holes":
@@ -2418,7 +2423,7 @@ def prepare_rough(jobs: Sequence[str], bay_file: str, design: List[DesignHole], 
     if not 2 <= len(design) <= 6:
         errs.append("enter 2 to 6 half slots")
     if stock is None:
-        errs.append("half slots need the stock box (side-B coordinates)")
+        errs.append("half slots need the stock box (job coordinates)")
     if not os.path.isfile(bay_file):
         errs.append(f"bay cut file not found: {bay_file}")
     missing = [j for j in jobs if not os.path.isfile(j)]
@@ -2597,11 +2602,11 @@ def apply_calibration(machine: Dict[str, float], c: Calibration) -> Dict[str, fl
 
 
 # --------------------------------------------------------------------------------------
-# several side-B files from one probing run (one file per tool)
+# several job files from one probing run (one file per tool)
 # --------------------------------------------------------------------------------------
 def batch_defaults(jobs: Sequence[str], nholes: Optional[int]) -> Tuple[Optional[List[DesignHole]], Optional[Box], List[str]]:
     """Hole and stock values remembered for any of the selected files, to pre-fill the prompts.
-    All side-B files of one job share the same holes, so a disagreement is pointed out."""
+    All files of one job share the same references, so a disagreement is pointed out."""
     holes: Optional[List[DesignHole]] = None
     stock: Optional[Box] = None
     notes: List[str] = []
@@ -2955,7 +2960,7 @@ def run_rough(data_path: str, bay_path: str, design: List[DesignHole], stock: Op
     lines, nl = read_text(bay_path)
     box = material_box(lines) or stock
     if box is None:
-        raise VDError("the bay cut needs the stock box in side-B coordinates: it tells where each slot opens")
+        raise VDError("the bay cut needs the stock box in job coordinates: it tells where each slot opens")
     retired = [] if rd.sim else retire_other_runs(data_path)
     if os.path.exists(out_path):
         os.remove(out_path)                                # ours (checked above): never leave an old one
@@ -3117,10 +3122,10 @@ def _window(mode: str, data: Optional[str] = None) -> int:
 
 
 def _main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="Virtual Dowel flip-alignment for ShopBot OpenSBP files")
+    ap = argparse.ArgumentParser(description="Virtual Dowel alignment for ShopBot OpenSBP files")
     ap.add_argument("data_pos", nargs="?", help="probe data file (default: vd_probe_data.csv next to this script)")
     ap.add_argument("--data", help="probe data written by vd_probe.sbp")
-    ap.add_argument("--job", action="append", help="side-B job file (.sbp); repeat for several files")
+    ap.add_argument("--job", action="append", help="job file (.sbp) to align; repeat for several files")
     ap.add_argument("--holes", help='hole centers + diameters, e.g. "12,1,0.5;12,29,0.625" '
                                     "(default: <job>.vdholes.txt)")
     ap.add_argument("--out", help="output file (default: <job>_VD.sbp)")

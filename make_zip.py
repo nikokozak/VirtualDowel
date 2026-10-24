@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Virtual Dowel - make_zip.py  v2.3  (2026-10-12)
+"""Virtual Dowel - make_zip.py  v2.7  (2026-10-23)
 Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
 
 Builds the zip for the shop PC:
@@ -18,7 +18,8 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOP = ["INSTALL.bat", "README.md", "LICENSE.txt", "docs/guide.html"]
-APP = ["vd_align.py", "vd_app.py", "vd_probe.sbp", "vd_selftest.sbp", "vd_align.bat"]
+APP = ["vd_align.py", "vd_app.py", "vd_probe.sbp", "vd_selftest.sbp", "vd_selftest_loop.sbp",
+       "vd_selftest_end.sbp", "vd_selftest_noend.sbp", "vd_align.bat"]
 
 
 def members():

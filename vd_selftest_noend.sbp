@@ -1,0 +1,4 @@
+' VIRTUAL DOWEL  -  vd_selftest_noend.sbp   v2.7  (2026-10-23)
+' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
+' Part of vd_selftest_loop.sbp. It sets a variable and has no END. Do not run it alone.
+&st_b = 1

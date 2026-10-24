@@ -14,6 +14,7 @@ vd_selftest_result.txt
 vd_selftest_literal.txt
 vd_selftest_variable.txt
 vd_selftest_chars.txt
+vd_selftest_loop_*.txt
 *_VD.sbp
 *_VDSIM.sbp
 *_report.txt

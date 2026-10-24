@@ -1,0 +1,72 @@
+'=====================================================================
+' VIRTUAL DOWEL  -  vd_selftest_loop.sbp   v2.7  (2026-10-23)
+' Copyright (c) 2026 Nikolai Kozak. All rights reserved. Proprietary - see LICENSE.txt.
+' Checks three things the Probe features tab needs - before it is built:
+'   1. VA with variables changes %(1) and %(2) - and whether it changes %(6) and %(7)
+'   2. a variable set in a file called with FP is seen by the caller
+'   3. the caller goes on after a called file with no END - and after one with END
+' The END test is last: if END in a called file ends the whole run - the other answers are on disk.
+' Run it in MOVE mode. It has NO motion commands. Nothing needs to be clamped.
+' VA moves the X and Y zero by 1 and back. The file checks that it came back.
+' It writes vd_selftest_loop_a.txt to vd_selftest_loop_d.txt into the SAME folder.
+' Each file starts with the date and time of the run.
+' If SB3 stops with an error - write down the LINE NUMBER and the message.
+' If it stops after file a and before file b - zero X Y and Z again before you cut.
+'=====================================================================
+IF %(22) = 1 THEN GOTO st_preview
+&st_a = 0
+&st_b = 0
+&st_dt = %(146)
+&st_tm = %(147)
+&st_x0 = %(1)
+&st_y0 = %(2)
+&st_z0 = %(3)
+&st_b6 = %(6)
+&st_b7 = %(7)
+OPEN "vd_selftest_loop_a.txt" FOR OUTPUT AS #1
+WRITE #1; "DT,"; &st_dt; " "; &st_tm
+WRITE #1; "BEFORE,"; &st_x0; ","; &st_y0; ","; &st_z0; ","; &st_b6; ","; &st_b7
+CLOSE #1
+&st_x1 = &st_x0 + 1
+&st_y1 = &st_y0 + 1
+VA, &st_x1, &st_y1
+&st_v1 = %(1)
+&st_v2 = %(2)
+&st_v3 = %(3)
+&st_v6 = %(6)
+&st_v7 = %(7)
+VA, &st_x0, &st_y0
+&st_w1 = %(1)
+&st_w2 = %(2)
+&st_w3 = %(3)
+&st_w6 = %(6)
+&st_w7 = %(7)
+OPEN "vd_selftest_loop_b.txt" FOR OUTPUT AS #2
+WRITE #2; "DT,"; &st_dt; " "; &st_tm
+WRITE #2; "VA_PLUS_1,"; &st_v1; ","; &st_v2; ","; &st_v3; ","; &st_v6; ","; &st_v7
+WRITE #2; "VA_BACK,"; &st_w1; ","; &st_w2; ","; &st_w3; ","; &st_w6; ","; &st_w7
+CLOSE #2
+&st_d = (&st_w1 - &st_x0) * (&st_w1 - &st_x0) + (&st_w2 - &st_y0) * (&st_w2 - &st_y0)
+&st_d = &st_d + (&st_w3 - &st_z0) * (&st_w3 - &st_z0)
+&st_d = &st_d + (&st_w6 - &st_b6) * (&st_w6 - &st_b6) + (&st_w7 - &st_b7) * (&st_w7 - &st_b7)
+IF &st_d > 0.00001 THEN GOTO st_notback
+FP,C:\SbParts\VirtualDowel\vd_selftest_noend.sbp
+OPEN "vd_selftest_loop_c.txt" FOR OUTPUT AS #3
+WRITE #3; "DT,"; &st_dt; " "; &st_tm
+WRITE #3; "AFTER_NOEND,ok"
+WRITE #3; "VAR_FROM_NOEND_FILE,"; &st_b
+CLOSE #3
+FP,C:\SbParts\VirtualDowel\vd_selftest_end.sbp
+OPEN "vd_selftest_loop_d.txt" FOR OUTPUT AS #1
+WRITE #1; "DT,"; &st_dt; " "; &st_tm
+WRITE #1; "AFTER_END,ok"
+WRITE #1; "VAR_FROM_END_FILE,"; &st_a
+CLOSE #1
+MSGBOX(Loop self-test finished. Send the four vd_selftest_loop files to Nikolai. Zero X and Y as usual before your next job.,64,Virtual Dowel)
+END
+st_notback:
+MSGBOX(The X - Y or Z values did not come back to where they were before the test. Zero X Y and Z again before you cut. Send files a and b to Nikolai.,16,Virtual Dowel)
+END
+st_preview:
+MSGBOX(ShopBot is in PREVIEW mode. Switch to MOVE mode - this test has no motion commands.,48,Virtual Dowel)
+END

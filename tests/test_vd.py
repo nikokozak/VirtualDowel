@@ -212,6 +212,32 @@ class TestProbeRoutineStatic(unittest.TestCase):
                 self.assertRegex(nxt, r"^(M2|MZ),")                  # a label or the graze counter may sit between
 
 
+def lint_sbp(tc, text):
+    """Labels exist, MSGBOX has three parts and a clean body, every variable is assigned, no motion."""
+    vm = VM(text, Machine(holes=[]), UI())
+    assigned = {"&MSGANSWER"}
+    for ln in text.splitlines():
+        code = strip_comment(ln).strip()
+        for m in re.finditer(r"\b(GOTO|GOSUB)\s+([A-Za-z_][A-Za-z0-9_]*)", code, re.I):
+            tc.assertIn(m.group(2).upper(), vm.labels, ln)
+        if code.upper().startswith("MSGBOX"):
+            m = re.match(r"^MSGBOX\s*\((.*)\)$", code)
+            tc.assertIsNotNone(m, ln)
+            parts = m.group(1).split(",")
+            tc.assertEqual(len(parts), 3, ln)
+            tc.assertNotRegex(parts[0], r"[()'\":]", ln)
+        for m in re.finditer(r"(&[A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)", code):
+            assigned.add(m.group(1).upper())
+        mi = re.match(r'^INPUT\s+"([^"]*)"\s*(.*)$', code)
+        if mi:
+            tc.assertNotIn(",", mi.group(1))
+            assigned.update(v.strip().upper() for v in mi.group(2).split(","))
+        tc.assertNotRegex(code, r"^(M[2-5XYZ]|J[2-5XYZ]|CG|CR|CC|CP|MH|JH|SK|C\d)\b", "no motion: " + ln)
+    for ln in text.splitlines():
+        for m in re.finditer(r"&[A-Za-z_][A-Za-z0-9_]*", strip_comment(ln)):
+            tc.assertIn(m.group(0).upper(), assigned, ln)
+
+
 # =====================================================================================
 class TestSelftestFile(unittest.TestCase):
     """vd_selftest.sbp: offline check the user runs in SB3 Preview mode."""
@@ -222,28 +248,7 @@ class TestSelftestFile(unittest.TestCase):
             cls.text = fh.read()
 
     def test_lint(self):
-        vm = VM(self.text, Machine(holes=[]), UI())
-        assigned = {"&MSGANSWER"}
-        for ln in self.text.splitlines():
-            code = strip_comment(ln).strip()
-            for m in re.finditer(r"\b(GOTO|GOSUB)\s+([A-Za-z_][A-Za-z0-9_]*)", code, re.I):
-                self.assertIn(m.group(2).upper(), vm.labels, ln)
-            if code.upper().startswith("MSGBOX"):
-                m = re.match(r"^MSGBOX\s*\((.*)\)$", code)
-                self.assertIsNotNone(m, ln)
-                parts = m.group(1).split(",")
-                self.assertEqual(len(parts), 3, ln)
-                self.assertNotRegex(parts[0], r"[()'\":]", ln)
-            for m in re.finditer(r"(&[A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)", code):
-                assigned.add(m.group(1).upper())
-            mi = re.match(r'^INPUT\s+"([^"]*)"\s*(.*)$', code)
-            if mi:
-                self.assertNotIn(",", mi.group(1))
-                assigned.update(v.strip().upper() for v in mi.group(2).split(","))
-            self.assertNotRegex(code, r"^(M[2-5XYZ]|J[2-5XYZ]|CG|CR|CC|CP|MH|JH|SK|C\d)\b", "no motion: " + ln)
-        for ln in self.text.splitlines():
-            for m in re.finditer(r"&[A-Za-z_][A-Za-z0-9_]*", strip_comment(ln)):
-                self.assertIn(m.group(0).upper(), assigned, ln)
+        lint_sbp(self, self.text)
 
     def test_runs_and_records_everything(self):
         m = Machine(holes=[], mode=1)
@@ -272,7 +277,7 @@ class TestSelftestFile(unittest.TestCase):
 
     def test_every_pause_is_whole_seconds(self):
         # a PAUSE under 1 s stopped the file on the user's SB3 until it was continued by hand
-        for f in ("vd_probe.sbp", "vd_selftest.sbp"):
+        for f in ("vd_probe.sbp", "vd_selftest.sbp", "vd_selftest_loop.sbp", "vd_selftest_end.sbp", "vd_selftest_noend.sbp"):
             with open(os.path.join(ROOT, f)) as fh:
                 for ln in fh.read().splitlines():
                     m = re.match(r"^\s*PAUSE\b\s*(.*)$", strip_comment(ln), re.I)
@@ -288,7 +293,7 @@ class TestSelftestFile(unittest.TestCase):
                 self.assertEqual(len(re.findall(rf"^\s*&{n}\s*=", text, re.M | re.I)), 1, (f, n))
 
     def test_no_operator_characters_in_quoted_text(self):
-        for f in ("vd_probe.sbp", "vd_selftest.sbp"):
+        for f in ("vd_probe.sbp", "vd_selftest.sbp", "vd_selftest_loop.sbp", "vd_selftest_end.sbp", "vd_selftest_noend.sbp"):
             with open(os.path.join(ROOT, f)) as fh:
                 self.assertEqual(risky_string_lines(fh.read()), [], f)
 
@@ -297,6 +302,99 @@ class TestSelftestFile(unittest.TestCase):
         self.assertTrue(lines[18].startswith('OPEN "vd_selftest_result.txt"'))
         self.assertTrue(lines[21].startswith('OPEN "C:\\SbParts\\VirtualDowel\\vd_selftest_literal.txt"'))
         self.assertTrue(lines[26].startswith("OPEN &st_out"))
+
+
+class TestSelftestLoopFile(unittest.TestCase):
+    """vd_selftest_loop.sbp: asks the machine about FP variables, END in a called file and VA (Move mode, no motion)."""
+    NAMES = ("vd_selftest_loop.sbp", "vd_selftest_end.sbp", "vd_selftest_noend.sbp")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.files = {}
+        for n in cls.NAMES:
+            with open(os.path.join(ROOT, n), "rb") as fh:
+                cls.files[n] = fh.read().decode("latin-1")
+
+    def test_lint(self):
+        for name, text in self.files.items():
+            lint_sbp(self, text)
+
+    def test_crlf_line_length_and_copyright(self):
+        for name, text in self.files.items():
+            self.assertEqual(text.count("\r\n"), text.count("\n"), name)
+            self.assertLessEqual(max(len(ln) for ln in text.split("\r\n")), va.MAX_SBP_LINE, name)
+            self.assertIn("Copyright (c) 2026 Nikolai Kozak. All rights reserved.", text, name)
+
+    def test_runs_and_records(self):
+        m = Machine(holes=[], mode=0)
+        ui = UI()
+        vm = TrackingVM(self.files["vd_selftest_loop.sbp"], m, ui, numfmt=vb_single).run()
+        self.assertEqual((vm.ended, m.moves), ("END", 0))
+        self.assertEqual(vm.fp, ["C:\\SbParts\\VirtualDowel\\vd_selftest_noend.sbp",
+                                 "C:\\SbParts\\VirtualDowel\\vd_selftest_end.sbp"])
+        self.assertEqual(len(vm.va), 2)                 # +1 in X and Y, then back
+        keys = {n: (vm.closed[n][0], [ln.split(",")[0] for ln in vm.closed[n][1]]) for n in vm.closed}
+        self.assertEqual(keys, {1: ("vd_selftest_loop_d.txt", ["DT", "AFTER_END", "VAR_FROM_END_FILE"]),
+                                2: ("vd_selftest_loop_b.txt", ["DT", "VA_PLUS_1", "VA_BACK"]),
+                                3: ("vd_selftest_loop_c.txt", ["DT", "AFTER_NOEND", "VAR_FROM_NOEND_FILE"])})
+        self.assertTrue(any("Loop self-test finished" in s for s in ui.messages), ui.messages)
+
+    def run_changed(self, old, new):
+        text = self.files["vd_selftest_loop.sbp"]
+        self.assertEqual(text.count(old), 1, old)
+        ui = UI()
+        vm = TrackingVM(text.replace(old, new), Machine(holes=[], mode=0), ui, numfmt=vb_single).run()
+        return vm, ui
+
+    def test_zero_not_back_stops_before_the_fp_tests(self):
+        vm, ui = self.run_changed("&st_w1 = %(1)", "&st_w1 = %(1) + 0.01")
+        self.assertEqual(vm.fp, [])
+        self.assertTrue(any("did not come back" in s and "Zero X Y and Z again" in s for s in ui.messages),
+                        ui.messages)
+
+    def test_rounding_of_the_position_alone_passes(self):
+        # %(1)/%(2) read to 0.001, so VA back to them can leave four values 0.0005 off
+        text = self.files["vd_selftest_loop.sbp"]
+        for v in ("&st_w1 = %(1)", "&st_w2 = %(2)", "&st_w6 = %(6)", "&st_w7 = %(7)"):
+            text = text.replace(v, v + " + 0.0005")
+        ui = UI()
+        TrackingVM(text, Machine(holes=[], mode=0), ui, numfmt=vb_single).run()
+        self.assertTrue(any("Loop self-test finished" in s for s in ui.messages), ui.messages)
+
+    def test_va_first_and_the_end_child_last(self):
+        # if END in a called file ends the whole run, the VA and no-END answers are on disk already
+        lines = self.files["vd_selftest_loop.sbp"].splitlines()
+        fps = [i for i, ln in enumerate(lines) if ln.startswith("FP,")]
+        self.assertLess(next(i for i, ln in enumerate(lines) if ln.startswith("VA,")), fps[0])
+        self.assertTrue(lines[fps[-1]].endswith("vd_selftest_end.sbp"))
+
+    def test_file_numbers_reused_only_for_the_last_file(self):
+        opens = [re.search(r"AS #(\d)$", ln).group(1) for ln in self.files["vd_selftest_loop.sbp"].splitlines()
+                 if ln.startswith("OPEN ")]
+        self.assertEqual(opens, ["1", "2", "3", "1"])
+
+    def test_every_result_file_starts_with_a_run_stamp(self):
+        lines = self.files["vd_selftest_loop.sbp"].splitlines()
+        for i, ln in enumerate(lines):
+            if ln.startswith("OPEN "):
+                n = ln[-1]
+                self.assertTrue(lines[i + 1].startswith(f'WRITE #{n}; "DT,"; &st_dt'), lines[i + 1])
+
+    def test_refuses_preview(self):
+        vm = TrackingVM(self.files["vd_selftest_loop.sbp"], Machine(holes=[], mode=1), UI(), numfmt=vb_single).run()
+        self.assertEqual((vm.fp, vm.va), ([], []))
+
+    def test_variables_reset_before_fp(self):
+        lines = self.files["vd_selftest_loop.sbp"].splitlines()
+        first_fp = next(i for i, ln in enumerate(lines) if ln.startswith("FP,"))
+        self.assertIn("&st_a = 0", lines[:first_fp])
+        self.assertIn("&st_b = 0", lines[:first_fp])
+
+    def test_before_values_on_disk_before_first_va(self):
+        lines = self.files["vd_selftest_loop.sbp"].splitlines()
+        before = next(i for i, ln in enumerate(lines) if ln.startswith('WRITE #1; "BEFORE,"'))
+        close = next(i for i in range(before, len(lines)) if lines[i] == "CLOSE #1")
+        self.assertLess(close, next(i for i, ln in enumerate(lines) if ln.startswith("VA,")))
 
 
 # =====================================================================================
@@ -325,9 +423,11 @@ class TestShopZip(unittest.TestCase):
         for n in ("VirtualDowel/INSTALL.bat", "VirtualDowel/README.md", "VirtualDowel/LICENSE.txt",
                   "VirtualDowel/docs/guide.html", "VirtualDowel/docs/example/sideB_example.sbp",
                   "VirtualDowel/app/vd_align.py", "VirtualDowel/app/vd_app.py", "VirtualDowel/app/vd_probe.sbp",
-                  "VirtualDowel/app/vd_selftest.sbp", "VirtualDowel/app/vd_align.bat"):
+                  "VirtualDowel/app/vd_selftest.sbp", "VirtualDowel/app/vd_align.bat",
+                  "VirtualDowel/app/vd_selftest_loop.sbp", "VirtualDowel/app/vd_selftest_end.sbp",
+                  "VirtualDowel/app/vd_selftest_noend.sbp"):
             self.assertIn(n, names)
-        self.assertEqual(len(names), 11)
+        self.assertEqual(len(names), 14)
         self.assertFalse([n for n in names if "/tests/" in n or "AGENTS" in n or "thick-stock-plan" in n])
         with open(os.path.join(ROOT, "INSTALL.bat"), "rb") as fh:
             text = fh.read()
@@ -356,22 +456,41 @@ class TestInstall(unittest.TestCase):
 
     def copy_to(self, folder):
         os.makedirs(folder, exist_ok=True)
-        for f in ("vd_probe.sbp", "vd_selftest.sbp"):
+        for f in ("vd_probe.sbp", "vd_selftest.sbp", "vd_selftest_loop.sbp", "vd_selftest_end.sbp",
+                  "vd_selftest_noend.sbp"):
             shutil.copy(os.path.join(ROOT, f), folder)
+
+    def test_install_rewrites_the_loop_test_twice(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            folder = os.path.join(tmp, "Shop", "VirtualDowel")
+            self.copy_to(folder)
+            shutil.copy(os.path.join(ROOT, "vd_align.py"), folder)
+            custom = os.path.join(tmp, "SbParts", "Custom")
+            os.makedirs(custom)
+            for _ in range(2):                       # INSTALL.bat again after an update
+                va.install_paths(folder, make_venv=False, custom_dir=custom)
+            st = open(os.path.join(folder, "vd_selftest_loop.sbp"), newline="").read().split("\r\n")
+            self.assertEqual([ln for ln in st if ln.startswith("FP,")],
+                             [f"FP,{folder}/vd_selftest_noend.sbp", f"FP,{folder}/vd_selftest_end.sbp"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_paths_are_rewritten_in_place(self):
         tmp = tempfile.mkdtemp()
         try:
             folder = os.path.join(tmp, "Shop", "VirtualDowel")
             self.copy_to(folder)
-            before = {f: open(os.path.join(folder, f), newline="").read() for f in ("vd_probe.sbp", "vd_selftest.sbp")}
+            before = {f: open(os.path.join(folder, f), newline="").read()
+                      for f in ("vd_probe.sbp", "vd_selftest.sbp", "vd_selftest_loop.sbp")}
             shutil.copy(os.path.join(ROOT, "vd_align.py"), folder)
             custom = os.path.join(tmp, "SbParts", "Custom")
             os.makedirs(custom)
             with open(os.path.join(custom, "Custom80.sbc"), "w", newline="") as fh:   # someone else's custom cut
                 fh.write("'my own C80\r\nJZ,1\r\n")
             changes = va.install_paths(folder, custom_dir=custom)
-            self.assertEqual(len([c for c in changes if c.startswith(("vd_probe.sbp:", "vd_selftest.sbp:"))]), 7)
+            self.assertEqual(len([c for c in changes
+                                  if c.startswith(("vd_probe.sbp:", "vd_selftest.sbp:", "vd_selftest_loop.sbp:"))]), 9)
             for f, old in before.items():
                 new = open(os.path.join(folder, f), newline="").read()
                 self.assertEqual(new.count("\r\n"), old.count("\r\n"))          # same lines, still CRLF
@@ -1090,7 +1209,7 @@ class TestFusion(unittest.TestCase):
         res = va.run_alignment(data, self.job, self.DESIGN, stock=(0.0, -30.0, 24.0, 0.0))
         self.assertFalse(res.ok)
         self.assertIn("does not cover the toolpaths", res.report)
-        self.assertNotIn("side-A numbers fit", res.report)        # no misleading follow-on messages
+        self.assertNotIn("mirror image of these positions", res.report)        # no misleading follow-on messages
         self.assertNotIn("outside the material", res.report)
         self.assertIsNone(res.out_path)
 
@@ -1267,7 +1386,7 @@ class TestEndToEnd(unittest.TestCase):
         data = self.probe(0.2, 1.0, 1.0, design=design)
         res = va.run_alignment(data, self.job, side_a)
         self.assertFalse(res.ok)
-        self.assertIn("shifted by 20.00", res.report)
+        self.assertIn("shift the job by 20.00", res.report)
         res = va.run_alignment(data, self.job, design)              # even the RIGHT numbers are ambiguous
         self.assertFalse(res.ok)
         th = dict(va.DEFAULTS, allow_offaxis_ambiguity=1)
@@ -1285,7 +1404,7 @@ class TestEndToEnd(unittest.TestCase):
         data = self.probe(0.2, 1.0, 1.0, design=design)
         res = va.run_alignment(data, self.job, design)
         self.assertTrue(res.ok, res.report)
-        self.assertIn("shifted by 0.060", res.report)
+        self.assertIn("shift the job by 0.060", res.report)
 
     def test_no_material_size_in_header(self):
         body = "\n".join(ln for ln in JOB_TEXT.splitlines() if "Length of material" not in ln) + "\n"
@@ -2204,6 +2323,10 @@ class TestPrepare(_Folder):
         return va.prepare_probing(jobs or [self.job], design, stock, mm, sim=sim, mode=mode, centre=centre,
                                   template=os.path.join(ROOT, "vd_probe.sbp"))
 
+    def test_prepare_asks_for_job_files(self):
+        p = va.prepare_probing([], DESIGN, None, self.machine, template=os.path.join(ROOT, "vd_probe.sbp"))
+        self.assertIn("add the job files", p.errors)
+
     def test_centre_fit_two_equal_bores_end_to_end(self):
         # a Fusion job (no material size) for a print 1 percent small, turned 1.2 deg, lying at (5, 7)
         job = os.path.join(self.tmp, "print.sbp")
@@ -2793,7 +2916,7 @@ class TestWindow(_Folder):
     def test_the_window_says_what_to_do_for_each_method(self):
         a = self.app("prepare")
         report = lambda: a.text.get("1.0", "end")                               # noqa: E731
-        self.assertIn("Through holes - what to do now", report())
+        self.assertIn("Two holes - what to do now", report())
         self.assertEqual(len(a.steps_bar.winfo_children()), 4)
         self.assertEqual(self.current_step(a), "1  Prepare")
         self.assertEqual(a.size_header.cget("text"), "Diameter")
@@ -2817,10 +2940,39 @@ class TestWindow(_Folder):
         self.assertIn("Through slots - what to do now", report())
         a.root.destroy()
 
+    def test_no_side_words_for_two_holes_and_centre(self):
+        a = self.app("prepare")
+
+        def texts(w):
+            out = []
+            try:
+                out.append(str(w.cget("text")))
+            except _tk.TclError:
+                pass
+            for c in w.winfo_children():
+                out += texts(c)
+            return out
+        for method in ("holes", "centre"):
+            a.loc_var.set(method)
+            a._on_locate_mode()
+            seen = texts(a.root) + [a.text.get("1.0", "end"), a.root.title()]
+            self.assertEqual([s for s in seen if re.search(r"(?i)\bside[- ]?[ab]\b", s)], [], method)
+        self.assertEqual(a.jobs_frame.cget("text"), "Job files - one per tool")
+        a.root.destroy()
+
+    def test_window_states_the_coordinate_rule(self):
+        a = self.app("prepare")
+        for method in ("holes", "centre"):
+            a.loc_var.set(method)
+            a._on_locate_mode()
+            self.assertIn("Reference positions in the coordinates of the files you align.",
+                          " ".join(a.text.get("1.0", "end").split()), method)
+        a.root.destroy()
+
     def test_centre_method_in_the_window(self):
         a = self.app("prepare")
         radios = [w.cget("text") for w in a.method_row.winfo_children() if w.winfo_class() == "TRadiobutton"]
-        self.assertEqual(radios, ["Through holes", "Half slots", "Through slots", "Centre and line"])
+        self.assertEqual(radios, ["Two holes", "Half slots", "Through slots", "Centre and line"])
         a.loc_var.set("centre")
         a._on_locate_mode()
         self.assertIn("Centre and line - what to do now", a.text.get("1.0", "end"))
@@ -2832,14 +2984,14 @@ class TestWindow(_Folder):
         a._on_locate_mode()
         self.assertEqual((a.probe_mode(), a.size_header.cget("text")), ("through", "Width"))
         self.assertTrue(a.holes_frame.cget("text").startswith("References"))
-        self.assertEqual(a.jobs_frame.cget("text"), "Job files for the part - one per tool")   # no side B here
+        self.assertEqual(a.jobs_frame.cget("text"), "Job files - one per tool")
         self.assertEqual(a.stock_frame.cget("text"), "Part outline - job coordinates")
         buttons = [w.cget("text") for w in a.check_btn.master.pack_slaves() if isinstance(w, ttk_Button())]
         self.assertNotIn("Start rough locate (bay cutter fitted)", buttons)
         a.loc_var.set("holes")
         a._on_locate_mode()
         self.assertFalse(a.ref_frame.winfo_manager())
-        self.assertTrue(a.jobs_frame.cget("text").startswith("Side-B job files"))
+        self.assertEqual(a.jobs_frame.cget("text"), "Job files - one per tool")
         a.root.destroy()
         # the results screen remembers the method from the session
         va.save_session({"kind": "probe", "mode": "through", "fit": "centre", "jobs": [self.job],
